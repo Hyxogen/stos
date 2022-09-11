@@ -147,7 +147,6 @@ struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *
 		stos_write_error("failed to allocate codec context");
 		goto cleanup;
 	}
-	//TODO try without dictionary
 
 	AVDictionary *opts = NULL;
 	if (av_dict_set(&opts, "", "", 0) < 0) {
