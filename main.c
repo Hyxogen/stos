@@ -23,6 +23,7 @@
 #include <stos.h>
 #include <stdlib.h>
 
+//todo fix extracting subtitles out of video files
 int main(int argc, char **argv) 
 {
 	struct file_info info;
