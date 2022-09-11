@@ -150,7 +150,7 @@ struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *
 	//TODO try without dictionary
 
 	AVDictionary *opts = NULL;
-	if (av_dict_set(&opts, "b", "2.5M", 0) < 0) {
+	if (av_dict_set(&opts, "", "", 0) < 0) {
 		stos_write_error("failed to set dictionary");
 		goto cleanup;
 	}
@@ -181,6 +181,8 @@ cleanup:
 		avcodec_free_context(&cctx);
 	if (pkt != NULL)
 		av_packet_free(&pkt);
+	if (opts != NULL)
+		av_dict_free(&opts);
 	return NULL;
 }
 
