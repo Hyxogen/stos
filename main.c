@@ -31,15 +31,19 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: %s <in_file>\n", argv[0]);
 		return EXIT_FAILURE;
 	}
-	if (get_file_info(&info, argv[1]) < 0)
-		goto error;
+	if (get_file_info(&info, argv[1]) < 0) {
+		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error());
+		return EXIT_FAILURE;
+	}
 	
 	struct subtitle *subs;
 	size_t n = 0;
 	
-	if ((subs = get_subs(&info, -1, &n)) == NULL)
-		goto error;
-
+	if ((subs = get_subs(&info, -1, &n)) == NULL) {
+		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error());
+		return EXIT_FAILURE;
+	}
+	
 	for (size_t sub_idx = 0; sub_idx < n; ++sub_idx) {
 		const struct subtitle *sub = &subs[sub_idx];
 		for (size_t txt_idx = 0; txt_idx < sub->num_text; ++txt_idx) {
@@ -47,13 +51,10 @@ int main(int argc, char **argv)
 				sub->end_time, sub->text[txt_idx]);
 		}
 	}
-
+	
 	del_subs(subs, n);
 	del_file_info(&info);
 	return EXIT_SUCCESS;
-error:
-	fprintf(stderr, "%s: %s\n", "error", stos_get_error());
-	return EXIT_FAILURE;
 }
 
 /* int main(int argc, char *argv[]) */
