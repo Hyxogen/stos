@@ -1,4 +1,4 @@
-// stos public interface
+// stos utility functions implementation
 
 // Copyright (C) 2022 Daan Meijer
 //
@@ -14,32 +14,19 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-#ifndef STOS_H
-#define STOS_H
+#include <stos_util.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include <stddef.h>
-#include <libavformat/avformat.h>
-
-struct file_info 
+#ifndef strdup
+char *strdup(const char *str)
 {
-	AVFormatContext *fctx;
-};
-
-struct subtitle
-{
-	unsigned int start_time;
-	unsigned int end_time;
-	size_t num_text;
-	char **text;
-};
-
-int get_file_info(struct file_info *info, const char *url);
-void del_file_info(struct file_info *info);
-
-struct subtitle *get_subs(const struct file_info *info, int stream_idx, size_t *n);
-void del_sub(struct subtitle *sub);
-void del_subs(struct subtitle *sub, size_t n);
-
-const char* stos_get_error(void);
-
+	size_t len = strlen(str) + 1;
+	char *result = malloc(len);
+	
+	if (result == NULL)
+		return NULL;
+	memcpy(result, str, len);
+	return result;
+}
 #endif

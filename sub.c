@@ -13,12 +13,13 @@
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with this program.  If not, see
-// <https://www.gnu.org/licenses/>.
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stos.h>
+#include <stos_util.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 
@@ -71,6 +72,25 @@ void del_file_info(struct file_info *info)
 		return;
 	avformat_close_input(&info->fctx);
 }
+
+void del_sub(struct subtitle *sub) 
+{
+	if (sub == NULL)
+		return;
+	for (size_t idx = 0; idx < sub->num_text; ++idx) {
+		free(sub->text[idx]);
+	}
+	free(sub->text);
+}
+
+void del_subs(struct subtitle *subs, size_t n)
+{
+	for (size_t idx = 0; idx < n; ++idx) {
+		del_sub(subs + idx);
+	}
+	free(subs);
+}
+
 /*
   https://ffmpeg.org/doxygen/trunk/codec__id_8h_source.html
 */
@@ -114,11 +134,109 @@ static AVStream* find_first_sub_stream(const struct file_info *info)
 	return NULL;
 }
 
+static int parse_sub(struct subtitle *dst, const AVSubtitle *sub,
+		     const AVPacket *pkt)
+{
+	dst->text = NULL;
+	dst->num_text = 0;
+	if (pkt->dts == AV_NOPTS_VALUE) {
+		dst->start_time = sub->start_display_time;
+		dst->end_time = sub->end_display_time;
+	} else {
+		dst->start_time = pkt->dts;
+		dst->end_time = dst->start_time + pkt->duration;
+	}
+	
+	if (sub->num_rects == 0)
+		return 0;
+	dst->text = malloc(sizeof(*dst->text) * sub->num_rects);
+	if (dst->text == NULL) {
+		stos_write_error("out of memory");
+		goto error;
+	}
+	
+	for (size_t idx = 0; idx < sub->num_rects; ++idx) {
+		dst->text[idx] = strdup(sub->rects[idx]->ass);
+		if (dst->text[idx] == NULL) {
+			stos_write_error("out of memory");
+			goto error;
+		}
+		dst->num_text += 1;
+	}
+	return 0;
+error:
+	del_sub(dst);
+	dst->text = NULL;
+	dst->num_text = 0;
+	return -1;
+}
+
+static int read_sub_pkt(AVFormatContext *fctx, AVPacket *pkt)
+{
+	int ret = av_read_frame(fctx, pkt);
+	if (ret == 0)
+		return 1;
+	return 0;
+}
+
+static struct subtitle *decode_subs(const struct file_info *info,
+				    AVCodecContext *cctx, size_t *n)
+{
+	struct subtitle *subs = NULL;
+	size_t count = 0;
+	size_t size = 0;
+	int ret;
+	int got;
+	
+	AVPacket *pkt = av_packet_alloc();
+	if (pkt == NULL) {
+		stos_write_error("failed to allocate packet");
+		goto error;
+	}
+	
+	AVSubtitle sub;
+	while ((ret = read_sub_pkt(info->fctx, pkt)) > 0) {
+		if (avcodec_decode_subtitle2(cctx, &sub, &got, pkt) < 0) {
+			stos_write_error("failed to decode subtitle");
+			goto error;
+		}
+		if (count == size) {
+			subs = realloc(subs,
+				       sizeof(*subs) * ((size + 1) * 2));
+			if (subs == NULL) {
+				stos_write_error("out of memory");
+				goto error;
+			}
+			size = (size + 1) * 2;
+		}
+		if (parse_sub(subs + count, &sub, pkt) < 0)
+			goto error;
+		if (got)
+			avsubtitle_free(&sub);
+		av_packet_unref(pkt);
+		++count;
+	}
+	if (ret >= 0)
+		goto cleanup;
+error:
+	free(subs);
+	subs = NULL;
+	count = 0;
+cleanup:
+	if (pkt != NULL)
+		av_packet_free(&pkt);
+	if (n != NULL)
+		*n = count;
+	return subs;
+}
+
+
 //https://ffmpeg.org/doxygen/trunk/transcoding_8c-example.html#a24
 struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *n)
 {
 	const AVCodec *codec = NULL;
 	AVStream *stream = NULL;
+	struct subtitle *subs = NULL;
 
 	if (stream_idx < 0) {
 		stream = find_first_sub_stream(info);
@@ -135,13 +253,6 @@ struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *
 		goto cleanup;
 	}
 	
-	AVPacket *pkt = NULL;
-	pkt = av_packet_alloc();
-	if (pkt == NULL) {
-		stos_write_error("failed to allocate packet");
-		goto cleanup;
-	}
-
 	AVCodecContext *cctx = avcodec_alloc_context3(codec);
 	if (cctx == NULL) {
 		stos_write_error("failed to allocate codec context");
@@ -158,30 +269,12 @@ struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *
 		goto cleanup;
 	}
 
-	int got;
-	AVSubtitle sub;
-	while (av_read_frame(info->fctx, pkt) == 0) {
-		if (avcodec_decode_subtitle2(cctx, &sub, &got, pkt) < 0) {
-			stos_write_error("failed to decode subtitle");
-			goto cleanup;
-		}
-		for (size_t idx = 0; idx < sub.num_rects; ++idx) {
-			fprintf(stdout, "type: %d text:%s\n",
-					(int) sub.rects[idx]->type,
-					sub.rects[idx]->ass);
-		}
-		if (got) {
-			avsubtitle_free(&sub);
-		}
-		av_packet_unref(pkt);
-	}
+	subs = decode_subs(info, cctx, n);
 cleanup:
 	if (cctx != NULL)
 		avcodec_free_context(&cctx);
-	if (pkt != NULL)
-		av_packet_free(&pkt);
 	if (opts != NULL)
 		av_dict_free(&opts);
-	return NULL;
+	return subs;
 }
 

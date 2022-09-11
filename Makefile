@@ -2,14 +2,14 @@ TARGET		:= stos
 
 CC		:= cc
 
-SOURCE_FILES	:= main.c sub.c
+SOURCE_FILES	:= main.c sub.c stos_util.c
 OBJECT_FILES	:= $(SOURCE_FILES:.c=.o)
 DEPEND_FILES	:= $(SOURCE_FILES:.c=.d)
 
-CFLAGS		:= -Wall -Wextra -std=c99 -pedantic -MMD -MP \
-		   -I.
-LFLAGS		:= -Wall -Wextra -std=c99 -pedantic -lavcodec -lavutil \
-		   -lavformat
+CFLAGS		:= -Wall -Wextra -std=c99 -pedantic -MMD -MP -g3 -O0 \
+		   -I. -fsanitize=address,undefined
+LFLAGS		:= -Wall -Wextra -std=c99 -pedantic -g3 -O0 -lavcodec -lavutil \
+		   -lavformat -fsanitize=address,undefined
 
 all: $(TARGET)
 

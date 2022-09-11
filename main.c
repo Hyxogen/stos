@@ -25,21 +25,35 @@
 
 int main(int argc, char **argv) 
 {
-	size_t n = 0;
 	struct file_info info;
 	
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s <in_file>\n", argv[0]);
 		return EXIT_FAILURE;
 	}
-	if (get_file_info(&info, argv[1]) < 0) {
-		fprintf(stderr, "%s: %s\n", argv[0], stos_get_error());
-		return EXIT_FAILURE;
-	}
-	get_subs(&info, -1, &n);
+	if (get_file_info(&info, argv[1]) < 0)
+		goto error;
+	
+	struct subtitle *subs;
+	size_t n = 0;
+	
+	if ((subs = get_subs(&info, -1, &n)) == NULL)
+		goto error;
 
+	for (size_t sub_idx = 0; sub_idx < n; ++sub_idx) {
+		const struct subtitle *sub = &subs[sub_idx];
+		for (size_t txt_idx = 0; txt_idx < sub->num_text; ++txt_idx) {
+			fprintf(stdout, "%u-%u: %s\n", sub->start_time,
+				sub->end_time, sub->text[txt_idx]);
+		}
+	}
+
+	del_subs(subs, n);
 	del_file_info(&info);
 	return EXIT_SUCCESS;
+error:
+	fprintf(stderr, "%s: %s\n", "error", stos_get_error());
+	return EXIT_FAILURE;
 }
 
 /* int main(int argc, char *argv[]) */
