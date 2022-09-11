@@ -38,4 +38,6 @@ void del_file_info(struct file_info *info);
 struct subtitle *get_subs(const struct file_info *info, int stream_idx, size_t *n);
 void del_sub(struct subtitle *sub);
 
+const char* stos_get_error(void);
+
 #endif

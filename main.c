@@ -33,7 +33,7 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	if (get_file_info(&info, argv[1]) < 0) {
-		fprintf(stderr, "%s: %s\n", argv[0], "file info");
+		fprintf(stderr, "%s: %s\n", argv[0], stos_get_error());
 		return EXIT_FAILURE;
 	}
 	get_subs(&info, -1, &n);
