@@ -10,6 +10,9 @@
 *.ass
 *.idx
 
+#video files
+*.mkv
+
 #executable files
 stos
 *.out
