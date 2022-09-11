@@ -31,6 +31,7 @@ struct subtitle
 	unsigned int end_time;
 	size_t num_text;
 	char **text;
+	int styled;
 };
 
 int get_file_info(struct file_info *info, const char *url);

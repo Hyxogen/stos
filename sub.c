@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 
@@ -134,11 +135,76 @@ static AVStream* find_first_sub_stream(const struct file_info *info)
 	return NULL;
 }
 
+static char *nstrchr(const char *str, char ch, size_t n)
+{
+	while (n > 0 && (str = strchr(str, ch)) != NULL) {
+		n--;
+		str++;
+	}
+	return (char *) str;
+}
+
+static int parse_ass(struct subtitle *dst, size_t idx, const char *event)
+{
+	size_t i = 0;
+	size_t j = 0;
+	size_t brackets = 0;
+	size_t len = 0;
+	
+	event = nstrchr(event, ',', 8);
+	if (event == NULL || *event == '\0') {
+		stos_write_error("invalid format");
+		return -1;
+	}
+	
+	len = strlen(event);
+	dst->text[idx] = malloc(len + 1);
+	if (dst->text[idx] == NULL) {
+		stos_write_error("out of memory");
+		return -1;
+	}
+	while (i < len) {
+		if (event[i] == '{') {
+			dst->styled = 1;
+			brackets += 1;
+		} else if (event[i] == '}' && brackets != 0) {
+			brackets -= 1;
+		} else if (event[i] == '\\' && i + 1 < len
+			   && tolower(event[i]) == 'n') {
+			dst->text[idx][j] = '\n';
+			j += 1;
+		} else if (brackets == 0) {
+			dst->text[idx][j] = event[i];
+			j += 1;
+		}
+		i += 1;
+	}
+	dst->text[idx][j] = '\0';
+	return 0;
+}
+
+static int parse_text(struct subtitle *dst, size_t idx, const char *text)
+{
+	dst->text[idx] = strdup(text);
+	if (dst->text[idx] == NULL) {
+		stos_write_error("out of memory");
+		return -1;
+	}
+	return 0;
+}
+
+static int parse_bitm(struct subtitle *dst, size_t idx)
+{
+	dst->text[idx] = NULL;
+	return 0;
+}
+
 static int parse_sub(struct subtitle *dst, const AVSubtitle *sub,
 		     const AVPacket *pkt)
 {
 	dst->text = NULL;
 	dst->num_text = 0;
+	dst->styled = 0;
 	//https://ffmpeg.org/doxygen/trunk/group__lavf__decoding.html
 	if (pkt->dts == AV_NOPTS_VALUE) {
 		dst->start_time = sub->start_display_time;
@@ -157,9 +223,18 @@ static int parse_sub(struct subtitle *dst, const AVSubtitle *sub,
 	}
 	
 	for (size_t idx = 0; idx < sub->num_rects; ++idx) {
-		dst->text[idx] = strdup(sub->rects[idx]->ass);
-		if (dst->text[idx] == NULL) {
-			stos_write_error("out of memory");
+		switch (sub->rects[idx]->type) {
+		case SUBTITLE_BITMAP:
+			parse_bitm(dst, idx);
+			break;
+		case SUBTITLE_TEXT:
+			parse_text(dst, idx, sub->rects[idx]->text);
+			break;
+		case SUBTITLE_ASS:
+			parse_ass(dst, idx, sub->rects[idx]->ass);
+			break;
+		default:
+			stos_write_error("unsupported subtitle type");
 			goto error;
 		}
 		dst->num_text += 1;
