@@ -26,12 +26,19 @@
 int main(int argc, char **argv) 
 {
 	size_t n = 0;
+	struct file_info info;
 	
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s <in_file>\n", argv[0]);
 		return EXIT_FAILURE;
 	}
-	get_subs(argv[1], &n);
+	if (get_file_info(&info, argv[1]) < 0) {
+		fprintf(stderr, "%s: %s\n", argv[0], "file info");
+		return EXIT_FAILURE;
+	}
+	get_subs(&info, -1, &n);
+
+	del_file_info(&info);
 	return EXIT_SUCCESS;
 }
 

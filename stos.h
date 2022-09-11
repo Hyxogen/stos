@@ -18,6 +18,12 @@
 #define STOS_H
 
 #include <stddef.h>
+#include <libavformat/avformat.h>
+
+struct file_info 
+{
+	AVFormatContext *fctx;
+};
 
 struct subtitle
 {
@@ -26,7 +32,10 @@ struct subtitle
 	char **text;
 };
 
-struct subtitle *get_subs(const char *file, size_t *n);
+int get_file_info(struct file_info *info, const char *url);
+void del_file_info(struct file_info *info);
+
+struct subtitle *get_subs(const struct file_info *info, int stream_idx, size_t *n);
 void del_sub(struct subtitle *sub);
 
 #endif

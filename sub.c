@@ -22,18 +22,81 @@
 
 #include <stdio.h>
 
-struct subtitle *get_subs(const char *url, size_t *n)
+int get_file_info(struct file_info *info, const char *url)
+{
+	info->fctx = NULL;
+	if (avformat_open_input(&info->fctx, url, NULL, NULL) < 0)
+		return -1;
+	if (avformat_find_stream_info(info->fctx, NULL) < 0)
+		return -1;
+	return 0;
+}
+
+void del_file_info(struct file_info *info) 
+{
+	if (info == NULL)
+		return;
+	avformat_close_input(&info->fctx);
+}
+/*
+  https://ffmpeg.org/doxygen/trunk/codec__id_8h_source.html
+*/
+static int stream_is_subtitle(const AVStream *stream) 
+{
+	enum AVCodecID id = stream->codecpar->codec_id;
+	return id == AV_CODEC_ID_DVD_SUBTITLE ||
+		id == AV_CODEC_ID_DVB_SUBTITLE ||
+		id == AV_CODEC_ID_TEXT ||
+		id == AV_CODEC_ID_XSUB ||
+		id == AV_CODEC_ID_SSA ||
+		id == AV_CODEC_ID_MOV_TEXT ||
+		id == AV_CODEC_ID_HDMV_PGS_SUBTITLE ||
+		id == AV_CODEC_ID_DVB_TELETEXT ||
+		id == AV_CODEC_ID_SRT ||
+		id == AV_CODEC_ID_MICRODVD ||
+		id == AV_CODEC_ID_EIA_608 ||
+		id == AV_CODEC_ID_JACOSUB ||
+		id == AV_CODEC_ID_SAMI ||
+		id == AV_CODEC_ID_REALTEXT ||
+		id == AV_CODEC_ID_STL ||
+		id == AV_CODEC_ID_SUBVIEWER1 ||
+		id == AV_CODEC_ID_SUBVIEWER ||
+		id == AV_CODEC_ID_SUBRIP ||
+		id == AV_CODEC_ID_WEBVTT ||
+		id == AV_CODEC_ID_MPL2 ||
+		id == AV_CODEC_ID_VPLAYER ||
+		id == AV_CODEC_ID_PJS ||
+		id == AV_CODEC_ID_ASS ||
+		id == AV_CODEC_ID_HDMV_TEXT_SUBTITLE ||
+		id == AV_CODEC_ID_TTML ||
+		id == AV_CODEC_ID_ARIB_CAPTION;
+}
+
+static AVStream* find_first_sub_stream(const struct file_info *info)
+{
+	for (size_t idx = 0; idx < info->fctx->nb_streams; ++idx) {
+		if (stream_is_subtitle(info->fctx->streams[idx]))
+			return info->fctx->streams[idx];
+	}
+	return NULL;
+}
+
+//https://ffmpeg.org/doxygen/trunk/transcoding_8c-example.html#a24
+struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *n)
 {
 	const AVCodec *codec = NULL;
-	AVFormatContext *fctx = NULL;
+	AVStream *stream = NULL;
 
-	if (avformat_open_input(&fctx, url, NULL, NULL) < 0)
+	if (stream_idx < 0) {
+		stream = find_first_sub_stream(info);
+	} else if ((unsigned int) stream_idx < info->fctx->nb_streams) {
+		stream = info->fctx->streams[stream_idx];
+	}
+
+	if (stream == NULL)
 		return NULL;
-	if (avformat_find_stream_info(fctx, NULL) < 0)
-		return NULL;
-	if (fctx->nb_streams <= 0)
-		return NULL;
-	codec = avcodec_find_decoder(fctx->streams[0]->codecpar->codec_id);
+
+	codec = avcodec_find_decoder(stream->codecpar->codec_id);
 	if (codec == NULL) {
 		fprintf(stderr, "failed to find codec\n");
 		return NULL;
@@ -65,7 +128,7 @@ struct subtitle *get_subs(const char *url, size_t *n)
 
 	int got;
 	AVSubtitle sub;
-	while (av_read_frame(fctx, pkt) == 0) {
+	while (av_read_frame(info->fctx, pkt) == 0) {
 		if (avcodec_decode_subtitle2(cctx, &sub, &got, pkt) < 0) {
 			fprintf(stderr, "%s: %s\n", "conv",
 					"failed to decode subtitle");
@@ -81,7 +144,8 @@ struct subtitle *get_subs(const char *url, size_t *n)
 		}
 		av_packet_unref(pkt);
 	}
-	avformat_close_input(&fctx);
+	avcodec_free_context(&cctx);
+	av_packet_free(&pkt);
 	return NULL;
 }
 
