@@ -1,0 +1,15 @@
+#emacs files
+*~
+
+#compilition files
+*.o
+*.d
+
+#subtitle files
+*.srt
+*.ass
+*.idx
+
+#executable files
+stos
+*.out
