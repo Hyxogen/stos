@@ -139,6 +139,7 @@ static int parse_sub(struct subtitle *dst, const AVSubtitle *sub,
 {
 	dst->text = NULL;
 	dst->num_text = 0;
+	//https://ffmpeg.org/doxygen/trunk/group__lavf__decoding.html
 	if (pkt->dts == AV_NOPTS_VALUE) {
 		dst->start_time = sub->start_display_time;
 		dst->end_time = sub->end_display_time;
