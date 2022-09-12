@@ -24,6 +24,7 @@
 #include <stdlib.h>
 
 //todo fix extracting subtitles out of video files
+//	maybe this can be fixed by using a parser?
 int main(int argc, char **argv) 
 {
 	struct file_info info;
