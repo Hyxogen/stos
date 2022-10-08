@@ -64,6 +64,8 @@ int get_file_info(struct file_info *info, const char *url)
 	}
 	return 0;
 error:
+	if (info->fctx != NULL)
+		avformat_close_input(&info->fctx);
 	return -1;
 }
 
