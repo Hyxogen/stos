@@ -38,12 +38,14 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	
-	struct subtitle *subs;
+	struct subtitle *subs = NULL;
 	size_t n = 0;
+	int status = EXIT_SUCCESS;
 	
 	if ((subs = get_subs(&info, -1, &n)) == NULL) {
 		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error());
-		return EXIT_FAILURE;
+		status = EXIT_FAILURE;
+		goto cleanup;
 	}
 	
 	for (size_t sub_idx = 0; sub_idx < n; ++sub_idx) {
@@ -53,8 +55,10 @@ int main(int argc, char **argv)
 				sub->end_time, sub->text[txt_idx]);
 		}
 	}
-	
-	del_subs(subs, n);
+
+ cleanup:
+	if (subs != NULL)
+		del_subs(subs, n);
 	del_file_info(&info);
-	return EXIT_SUCCESS;
+	return status;
 }
