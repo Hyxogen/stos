@@ -225,13 +225,16 @@ static int parse_sub(struct subtitle *dst, const AVSubtitle *sub,
 	for (size_t idx = 0; idx < sub->num_rects; ++idx) {
 		switch (sub->rects[idx]->type) {
 		case SUBTITLE_BITMAP:
-			parse_bitm(dst, idx);
+			if (parse_bitm(dst, idx) < 0)
+				goto error;
 			break;
 		case SUBTITLE_TEXT:
-			parse_text(dst, idx, sub->rects[idx]->text);
+			if (parse_text(dst, idx, sub->rects[idx]->text) < 0)
+				goto error;
 			break;
 		case SUBTITLE_ASS:
-			parse_ass(dst, idx, sub->rects[idx]->ass);
+			if (parse_ass(dst, idx, sub->rects[idx]->ass) < 0)
+				goto error;
 			break;
 		default:
 			stos_write_error("unsupported subtitle type");
