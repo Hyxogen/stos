@@ -267,7 +267,7 @@ static struct subtitle *decode_subs(const struct file_info *info,
 	size_t count = 0;
 	size_t size = 0;
 	int ret;
-	int got;
+	int got = 0;
 	
 	AVPacket *pkt = av_packet_alloc();
 	if (pkt == NULL) {
@@ -290,10 +290,13 @@ static struct subtitle *decode_subs(const struct file_info *info,
 			}
 			size = (size + 1) * 2;
 		}
-		if (parse_sub(subs + count, &sub, pkt) < 0)
+		if (parse_sub(subs + count, &sub, pkt) < 0) {
+			av_packet_unref(pkt);
 			goto error;
+		}
 		if (got)
 			avsubtitle_free(&sub);
+		got = 0;
 		av_packet_unref(pkt);
 		++count;
 	}
@@ -306,6 +309,8 @@ error:
 	subs = NULL;
 	count = 0;
 cleanup:
+	if (got)
+		avsubtitle_free(&sub);
 	if (pkt != NULL)
 		av_packet_free(&pkt);
 	if (n != NULL)
