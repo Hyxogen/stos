@@ -303,9 +303,7 @@ static struct subtitle *decode_subs(const struct file_info *info,
 	if (ret >= 0)
 		goto cleanup;
 error:
-	//todo properly free subs as it is currently leaking when an
-	//error occurs
-	free(subs);
+	del_subs(subs, count);
 	subs = NULL;
 	count = 0;
 cleanup:
