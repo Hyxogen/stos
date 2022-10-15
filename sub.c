@@ -21,52 +21,61 @@
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
+#include <assert.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 
+#define stos_assert(x)     \
+	do {               \
+		assert(x); \
+	} while (0)
 
-#ifndef ERROR_BUF_SIZE
-# define ERROR_BUF_SIZE 1024
-#endif
-#if ERROR_BUF_SIZE <= 0
-# error "ERROR_BUF_SIZE must be a positive integer"
-#endif
-static char error[ERROR_BUF_SIZE];
-
-const char *stos_get_error(void) 
+const char *stos_get_error(enum stos_error error)
 {
-	return error;
+	switch (error) {
+	case STOS_SUCCESS:
+		return "no error";
+	case STOS_OUT_OF_MEMORY:
+		return "out of memory";
+	case STOS_COULD_NOT_OPEN:
+		return "could not open a stream or a file";
+	case STOS_NO_INFO:
+		return "no information could be retrieved about the file";
+	case STOS_NO_STREAM:
+		return "the file does not have a stream";
+	case STOS_INVALID_FORMAT:
+		return "the contents of the file is not properly formatted";
+	case STOS_COULD_NOT_DECODE:
+		return "unable to decode the subtitle";
+	case STOS_UNSUPPORTED:
+		return "stos currently does not support this";
+	case STOS_END_OF_STREAM:
+		return "the end of the stream was reached";
+	case STOS_UNKNOWN:
+		return "an unknown error occurred, please make an issue of this on the repository page";
+	default:
+		return "incorrect error code";
+	}
 }
 
-static int stos_write_error(const char *restrict fmt, ...)
+enum stos_error get_file_info(struct file_info *info, const char *url)
 {
-	int ret;
+	enum stos_error error;
 	
-	va_list args;
-	va_start(args, fmt);
-	ret = vsnprintf(error, ERROR_BUF_SIZE, fmt, args);
-	va_end(args);
-	if (ret < 0)
-		abort();
-	return ret;
-}
-
-int get_file_info(struct file_info *info, const char *url)
-{
 	info->fctx = NULL;
 	if (avformat_open_input(&info->fctx, url, NULL, NULL) < 0) {
-		stos_write_error("%s: failed to open for input", url);
+		error = STOS_COULD_NOT_OPEN;
 		goto error;
 	}
 	if (avformat_find_stream_info(info->fctx, NULL) < 0) {
-		stos_write_error("%s: failed to retrieve stream info", url);
+		error = STOS_NO_INFO;
 		goto error;
 	}
-	return 0;
+	return STOS_SUCCESS;
 error:
 	if (info->fctx != NULL)
 		avformat_close_input(&info->fctx);
-	return -1;
+	return error;
 }
 
 void del_file_info(struct file_info *info) 
@@ -86,6 +95,9 @@ void del_sub(struct subtitle *sub)
 	free(sub->text);
 }
 
+/* Perhaps make this take a pointer-pointer to subs to indicate that
+ * this function takes ownership of subs?
+ */
 void del_subs(struct subtitle *subs, size_t n)
 {
 	for (size_t idx = 0; idx < n; ++idx) {
@@ -146,33 +158,30 @@ static char *nstrchr(const char *str, char ch, size_t n)
 	return (char *) str;
 }
 
-static int parse_ass(struct subtitle *dst, size_t idx, const char *event)
+static enum stos_error parse_ass(struct subtitle *dst, size_t idx,
+				 const char *event)
 {
 	size_t i = 0;
 	size_t j = 0;
 	size_t brackets = 0;
 	size_t len = 0;
-	
+
 	event = nstrchr(event, ',', 8);
-	if (event == NULL || *event == '\0') {
-		stos_write_error("invalid format");
-		return -1;
-	}
-	
+	if (event == NULL || *event == '\0')
+		return STOS_INVALID_FORMAT;
+
 	len = strlen(event);
 	dst->text[idx] = malloc(len + 1);
-	if (dst->text[idx] == NULL) {
-		stos_write_error("out of memory");
-		return -1;
-	}
+	if (dst->text[idx] == NULL)
+		return STOS_OUT_OF_MEMORY;
 	while (i < len) {
 		if (event[i] == '{') {
 			dst->styled = 1;
 			brackets += 1;
 		} else if (event[i] == '}' && brackets != 0) {
 			brackets -= 1;
-		} else if (event[i] == '\\' && i + 1 < len
-			   && tolower(event[i]) == 'n') {
+		} else if (event[i] == '\\' && i + 1 < len &&
+			   tolower(event[i]) == 'n') {
 			dst->text[idx][j] = '\n';
 			j += 1;
 		} else if (brackets == 0) {
@@ -185,144 +194,184 @@ static int parse_ass(struct subtitle *dst, size_t idx, const char *event)
 	return 0;
 }
 
-static int parse_text(struct subtitle *dst, size_t idx, const char *text)
+static enum stos_error parse_text(struct subtitle *dst, size_t idx,
+				  const char *text)
 {
 	dst->text[idx] = strdup(text);
-	if (dst->text[idx] == NULL) {
-		stos_write_error("out of memory");
-		return -1;
-	}
-	return 0;
+	if (dst->text[idx] == NULL)
+		return STOS_OUT_OF_MEMORY;
+	return STOS_SUCCESS;
 }
 
-static int parse_bitm(struct subtitle *dst, size_t idx)
+static enum stos_error parse_bitm(struct subtitle *dst, size_t idx)
 {
 	dst->text[idx] = NULL;
-	return 0;
+	return STOS_SUCCESS;
 }
 
-static int parse_sub(struct subtitle *dst, const AVSubtitle *sub,
-		     const AVPacket *pkt)
+static enum stos_error parse_sub(struct subtitle *dst, const AVSubtitle *sub)
 {
+	enum stos_error error = STOS_SUCCESS;
 	dst->text = NULL;
 	dst->num_text = 0;
 	dst->styled = 0;
-	//https://ffmpeg.org/doxygen/trunk/group__lavf__decoding.html
-	if (pkt->dts == AV_NOPTS_VALUE) {
-		dst->start_time = sub->start_display_time;
-		dst->end_time = sub->end_display_time;
-	} else {
-		dst->start_time = pkt->dts;
-		dst->end_time = dst->start_time + pkt->duration;
-	}
+
+	dst->start_time = sub->start_display_time;
+	dst->end_time = sub->end_display_time;
 	
 	if (sub->num_rects == 0)
 		return 0;
 	dst->text = malloc(sizeof(*dst->text) * sub->num_rects);
 	if (dst->text == NULL) {
-		stos_write_error("out of memory");
-		goto error;
+		error = STOS_OUT_OF_MEMORY;
+		goto cleanup;
 	}
-	
+
 	for (size_t idx = 0; idx < sub->num_rects; ++idx) {
+		dst->text[idx] = NULL;
+		
+		if (error != STOS_SUCCESS)
+			continue;
+		
 		switch (sub->rects[idx]->type) {
 		case SUBTITLE_BITMAP:
-			if (parse_bitm(dst, idx) < 0)
-				goto error;
+			error = parse_bitm(dst, idx);
 			break;
 		case SUBTITLE_TEXT:
-			if (parse_text(dst, idx, sub->rects[idx]->text) < 0)
-				goto error;
+			error = parse_text(dst, idx, sub->rects[idx]->text);
 			break;
 		case SUBTITLE_ASS:
-			if (parse_ass(dst, idx, sub->rects[idx]->ass) < 0)
-				goto error;
+			error = parse_ass(dst, idx, sub->rects[idx]->ass);
+			if (error == STOS_INVALID_FORMAT)
+				error= STOS_SUCCESS;
 			break;
 		default:
-			stos_write_error("unsupported subtitle type");
-			goto error;
+			error = STOS_INVALID_FORMAT;
 		}
 		dst->num_text += 1;
 	}
-	return 0;
-error:
-	del_sub(dst);
-	dst->text = NULL;
-	dst->num_text = 0;
-	return -1;
+cleanup:
+	if (error != STOS_SUCCESS) {
+		del_sub(dst);
+		dst->text = NULL;
+		dst->num_text =0;
+	}
+	return error;
 }
 
-static int read_sub_pkt(AVFormatContext *fctx, AVPacket *pkt)
+static enum stos_error read_sub_pkt(AVFormatContext *fctx, AVPacket *pkt)
 {
 	int ret = av_read_frame(fctx, pkt);
 	if (ret == 0)
-		return 1;
-	return 0;
+		return STOS_SUCCESS;
+	/* TODO make this an error and try to check for end of stream
+	   in the decoding stage (with avcodec_decode_subtitle2)*/
+	return STOS_END_OF_STREAM;
 }
 
-static struct subtitle *decode_subs(const struct file_info *info,
-				    AVCodecContext *cctx, size_t *n)
+//https://ffmpeg.org/doxygen/trunk/group__lavf__decoding.html
+static void sub_fix_timings(AVSubtitle *sub, const AVPacket *pkt)
 {
-	struct subtitle *subs = NULL;
+	if (pkt->dts != AV_NOPTS_VALUE) {
+		sub->start_display_time = pkt->dts;
+		sub->end_display_time = pkt->pts;
+	}
+}
+
+static enum stos_error read_sub_and_decode(AVFormatContext *fctx,
+					   AVCodecContext *cctx, AVPacket *pkt,
+					   AVSubtitle *sub)
+{
+	enum stos_error error;
+
+	error = read_sub_pkt(fctx, pkt);
+	if (error != STOS_SUCCESS)
+		return error;
+
+	int got, rc;
+	rc = avcodec_decode_subtitle2(cctx, sub, &got, pkt);
+	if (rc == AVERROR_INVALIDDATA)
+		error = STOS_INVALID_FORMAT;
+	else if (rc < 0)
+		error = STOS_UNKNOWN;
+	else if (got == 0)
+		error = STOS_UNSUPPORTED;
+
+	sub_fix_timings(sub, pkt);
+
+	av_packet_unref(pkt);
+	return error;
+}
+
+static enum stos_error decode_subs(struct subtitle **out,
+				   const struct file_info *info,
+				   AVCodecContext *cctx, size_t *n)
+
+{
 	size_t count = 0;
 	size_t size = 0;
-	int ret;
-	int got = 0;
+	enum stos_error error = STOS_SUCCESS;
+	struct subtitle *subs = NULL;
+	AVSubtitle sub;
 	
 	AVPacket *pkt = av_packet_alloc();
-	if (pkt == NULL) {
-		stos_write_error("failed to allocate packet");
-		goto error;
-	}
-	
-	AVSubtitle sub;
-	while ((ret = read_sub_pkt(info->fctx, pkt)) > 0) {
-		if (avcodec_decode_subtitle2(cctx, &sub, &got, pkt) < 0) {
-			stos_write_error("failed to decode subtitle");
-			goto error;
+	if (pkt == NULL)
+		return STOS_OUT_OF_MEMORY;
+
+	/* TODO check if I can deallocate the packet after decoding */
+	while (error == STOS_SUCCESS) {
+		error = read_sub_and_decode(info->fctx, cctx, pkt, &sub);
+		if (error != STOS_SUCCESS) {
+			if (error == STOS_INVALID_FORMAT)
+				error = STOS_SUCCESS;
+			continue;
 		}
+		
+
 		if (count == size) {
-			subs = realloc(subs,
-				       sizeof(*subs) * ((size + 1) * 2));
+			size_t new_size = (size + 1) * 2;
+			subs = realloc(subs, sizeof(*subs) * new_size);
 			if (subs == NULL) {
-				stos_write_error("out of memory");
-				goto error;
+				error = STOS_OUT_OF_MEMORY;
+				goto cleanup_and_loop;
 			}
-			size = (size + 1) * 2;
+			size = new_size;
 		}
-		if (parse_sub(subs + count, &sub, pkt) < 0) {
-			av_packet_unref(pkt);
-			goto error;
-		}
-		if (got)
-			avsubtitle_free(&sub);
-		got = 0;
-		av_packet_unref(pkt);
-		++count;
+
+		error = parse_sub(subs + count, &sub);
+		if (error != STOS_SUCCESS)
+			goto cleanup_and_loop;
+
+		count += 1;
+cleanup_and_loop:
+		avsubtitle_free(&sub);
 	}
-	if (ret >= 0)
-		goto cleanup;
-error:
+	if (error == STOS_SUCCESS || error == STOS_END_OF_STREAM) {
+		error = STOS_SUCCESS;
+		goto cleanup_and_return;
+	}
 	del_subs(subs, count);
 	subs = NULL;
 	count = 0;
-cleanup:
-	if (got)
-		avsubtitle_free(&sub);
+cleanup_and_return:
 	if (pkt != NULL)
 		av_packet_free(&pkt);
+	if (out != NULL)
+		*out = subs;
+	else
+		free(subs);
 	if (n != NULL)
 		*n = count;
-	return subs;
+	return error;
 }
 
-
 //https://ffmpeg.org/doxygen/trunk/transcoding_8c-example.html#a24
-struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *n)
+enum stos_error get_subs(struct subtitle **out, const struct file_info *info,
+			  int stream_idx, size_t *n)
 {
+	enum stos_error error = STOS_SUCCESS;
 	const AVCodec *codec = NULL;
 	AVStream *stream = NULL;
-	struct subtitle *subs = NULL;
 
 	if (stream_idx < 0) {
 		stream = find_first_sub_stream(info);
@@ -330,37 +379,39 @@ struct subtitle* get_subs(const struct file_info *info, int stream_idx, size_t *
 		stream = info->fctx->streams[stream_idx];
 	}
 
-	if (stream == NULL)
+	if (stream == NULL) {
+		error = STOS_NO_STREAM;
 		goto cleanup;
+	}
 
 	codec = avcodec_find_decoder(stream->codecpar->codec_id);
 	if (codec == NULL) {
-		stos_write_error("failed to find codec");
+		error = STOS_UNSUPPORTED;
 		goto cleanup;
 	}
 	
 	AVCodecContext *cctx = avcodec_alloc_context3(codec);
 	if (cctx == NULL) {
-		stos_write_error("failed to allocate codec context");
+		error = STOS_OUT_OF_MEMORY;
 		goto cleanup;
 	}
 
 	AVDictionary *opts = NULL;
 	if (av_dict_set(&opts, "", "", 0) < 0) {
-		stos_write_error("failed to set dictionary");
+		error = STOS_UNKNOWN;
 		goto cleanup;
 	}
 	if (avcodec_open2(cctx, codec, &opts) < 0) {
-		stos_write_error("could not open2 codec");
+		error = STOS_UNKNOWN;
 		goto cleanup;
 	}
 
-	subs = decode_subs(info, cctx, n);
+	error = decode_subs(out, info, cctx, n);
 cleanup:
 	if (cctx != NULL)
 		avcodec_free_context(&cctx);
 	if (opts != NULL)
 		av_dict_free(&opts);
-	return subs;
+	return error;
 }
 

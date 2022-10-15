@@ -28,22 +28,25 @@
 int main(int argc, char **argv) 
 {
 	struct file_info info;
+	enum stos_error error;
 	
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s <in_file>\n", argv[0]);
 		return EXIT_FAILURE;
 	}
-	if (get_file_info(&info, argv[1]) < 0) {
-		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error());
+	error = get_file_info(&info, argv[1]);
+	if (error != STOS_SUCCESS) {
+		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error(error));
 		return EXIT_FAILURE;
 	}
 	
 	struct subtitle *subs = NULL;
 	size_t n = 0;
 	int status = EXIT_SUCCESS;
-	
-	if ((subs = get_subs(&info, -1, &n)) == NULL) {
-		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error());
+
+	error = get_subs(&subs, &info, -1, &n);
+	if (error != STOS_SUCCESS) {
+		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error(error));
 		status = EXIT_FAILURE;
 		goto cleanup;
 	}
