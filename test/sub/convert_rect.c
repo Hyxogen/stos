@@ -1,4 +1,4 @@
-// simple text conversion tests
+// simple rect conversion tests
 
 // Copyright (C) 2022 Daan Meijer
 //
