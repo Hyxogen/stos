@@ -8,7 +8,7 @@ static char *stos_nstrchr(const char *str, int ch, size_t n)
 {
 	while (n > 0 && (str = strchr(str, ch)) != NULL) {
 		n -= 1;
-		str += 1;
+		str += (n != 0);
 	}
 	return (char *) str;
 }
@@ -21,6 +21,7 @@ static enum stos_error stos_ass_extract(char **out, size_t *len, int *styled,
 	if (event == NULL)
 		return STOS_EVAL;
 
+	event += 1;
 	size_t event_len = strlen(event);
 	char *text = malloc(event_len + 1);
 	if (text == NULL)
