@@ -21,9 +21,34 @@
 
 enum stos_error
 {
-	STOS_SUCCESS = 0,
-	STOS_EVAL,
-	STOS_ENOMEM
+	STOS_OK = 0,
+	STOS_EINVAL,
+	STOS_ENOMEM,
+	STOS_UNSUP
 };
+
+enum rect_type
+{
+	STOS_TYPE_TEXT,
+	STOS_TYPE_BITMAP
+};
+
+struct rect 
+{
+	enum rect_type type;
+	char *text;
+};
+
+struct subtitle
+{
+	unsigned int start_time;
+	unsigned int end_time;
+	
+	size_t num_rects;
+	struct rect *rects;
+};
+
+void stos_destroy_rect(struct rect *rect);
+void stos_destroy_sub(struct subtitle *sub);
 
 #endif

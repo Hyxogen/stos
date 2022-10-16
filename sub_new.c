@@ -17,9 +17,9 @@ static char *stos_nstrchr(const char *str, int ch, size_t n)
 static enum stos_error stos_ass_extract(char **out, size_t *len, int *styled,
 					const char *event)
 {
-	event = stos_nstrchr(event, ',', (size_t) 8);
+	event = stos_nstrchr(event, ',', (size_t)8);
 	if (event == NULL)
-		return STOS_EVAL;
+		return STOS_EINVAL;
 
 	event += 1;
 	size_t event_len = strlen(event);
@@ -55,5 +55,5 @@ static enum stos_error stos_ass_extract(char **out, size_t *len, int *styled,
 		*len = j;
 	if (styled != NULL)
 		*styled = has_style;
-	return STOS_SUCCESS;
+	return STOS_OK;
 }
