@@ -48,6 +48,8 @@ static enum stos_error stos_ass_extract(char **out, size_t *len, int *styled,
 	text[j] = '\0';
 	if (out != NULL)
 		*out = text;
+	else
+		free(text);
 	if (len != NULL)
 		*len = j;
 	if (styled != NULL)
