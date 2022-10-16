@@ -45,7 +45,7 @@ int main(int argc, char **argv)
 		input = read_input(file);
 		assert(fclose(file) == 0);
 	}	
-	char *out;
+	char *out = NULL;
 	size_t len;
 	int styled;
 	
