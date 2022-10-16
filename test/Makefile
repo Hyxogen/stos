@@ -25,12 +25,14 @@ WARNINGS	:= -Wall -Wextra -std=c99 -pedantic \
 		   -Wformat-type-confusion -Wpointer-arith \
 		   -Widiomatic-parentheses -Wunreachable-code-aggressive \
 		   -Wthread-safety
-CFLAGS		:= -O2 -g $(WARNINGS) -I.. -MMD -MP
+INCLUDE_DIRS	:= -I..
+CFLAGS		:= -O2 -g $(WARNINGS) $(INCLUDE_DIRS) -MMD -MP
 
 CFILES		:= $(shell find . -type f -name '*.c')
 HEADER_DEPS	:= $(CFILES:.c=.d)
 TSTFILES	:= $(addsuffix .mem.out,$(CFILES)) \
-		   $(addsuffix .addr.out,$(CFILES))
+		   $(addsuffix .addr.out,$(CFILES)) \
+		   $(addsuffix .static.out,$(CFILES))
 
 BIN_DIR		:= bin
 
@@ -71,6 +73,11 @@ testdrivers: $(TSTFILES)
 -include $(HEADER_DEPS)
 %.c.addr.out: %.c Makefile
 	$(CC) $(CFLAGS) -fsanitize=address,undefined,integer -o $@ $<
+
+-include $(HEADER_DEPS)
+%.c.static.out: %.c Makefile
+	scan-build -analyze-headers --status-bugs \
+		-enable-checker alpha.security $(CC) $(INCLUDE_DIRS) -O2 -g -o $@ $<
 
 .PHONY: clean
 clean:
