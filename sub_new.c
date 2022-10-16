@@ -29,6 +29,7 @@ void stos_destroy_sub(struct subtitle *sub)
 	for (size_t i = 0; i < sub->num_rects; ++i) {
 		stos_destroy_rect(&sub->rects[i]);
 	}
+	free(sub->rects);
 }
 
 /* perform strchr(strchr(...) + 1, ch) n times */
