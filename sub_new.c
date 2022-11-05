@@ -5,11 +5,11 @@
 #include <libavcodec/avcodec.h>
 
 /* custom implementation of strdup */
-char* stos_strdup(const char *str)
+char *stos_strdup(const char *str)
 {
-	size_t len = strlen(str);	
+	size_t len = strlen(str);
 	char *result = malloc(len + 1);
-	
+
 	if (result != NULL) {
 		memcpy(result, str, len);
 		result[len] = '\0';
@@ -35,9 +35,9 @@ void stos_destroy_sub(struct subtitle *sub)
 /* destroy n subtitles in an array */
 void stos_destroy_subs(struct subtitle *sub, size_t n)
 {
-        for (size_t i = 0; i < n; ++i) {
-                stos_destroy_sub(sub + i);
-        }
+	for (size_t i = 0; i < n; ++i) {
+		stos_destroy_sub(sub + i);
+	}
 }
 
 /* perform strchr(strchr(...) + 1, ch) n times */
@@ -51,25 +51,25 @@ static char *stos_nstrchr(const char *str, int ch, size_t n)
 }
 
 /* retrieve human readable string of an error */
-const char *stos_get_error(enum stos_error error) 
+const char *stos_get_error(enum stos_error error)
 {
-        switch (error) {
-        case STOS_OK:
-                return "no error";
-        case STOS_EINVAL:
-                return "an invalid argument was passed";
-        case STOS_ENOMEM:
-                return "the process ran out of memory";
-        case STOS_UNSUP:
-                return "format is not supported";
-        case STOS_EIO:
-                return "could not properly read from file";
-        case STOS_ENOSUB:
-                return "could not retrieve subtitle stream";
-        case STOS_EUNKNOWN:
-        default:
-                return "an unknown error ocurred, please report this";
-        }
+	switch (error) {
+	case STOS_OK:
+		return "no error";
+	case STOS_EINVAL:
+		return "an invalid argument was passed";
+	case STOS_ENOMEM:
+		return "the process ran out of memory";
+	case STOS_UNSUP:
+		return "format is not supported";
+	case STOS_EIO:
+		return "could not properly read from file";
+	case STOS_ENOSUB:
+		return "could not retrieve subtitle stream";
+	case STOS_EUNKNOWN:
+	default:
+		return "an unknown error ocurred, please report this";
+	}
 }
 
 /* extract the text part out of an ass event without the style */
@@ -191,27 +191,26 @@ error:
 /* insert possibly missing subtitle start and end times */
 void stos_subtitle_fix_timings(AVSubtitle *sub, const AVPacket *pkt)
 {
-        if (pkt->dts != AV_NOPTS_VALUE) {
-                sub->start_display_time = pkt->dts;
-                sub->end_display_time = pkt->pts;
-        }
+	if (pkt->dts != AV_NOPTS_VALUE) {
+		sub->start_display_time = pkt->dts;
+		sub->end_display_time = pkt->pts;
+	}
 }
 
 /* convert a packet from a subtitle stream to a struct subtitle */
-static enum stos_error stos_convert_packet(struct subtitle *dst,
-					   AVPacket *pkt,
-                                           struct istream *stream)
+static enum stos_error stos_convert_packet(struct subtitle *dst, AVPacket *pkt,
+					   struct istream *stream)
 {
-        AVSubtitle avsub;
-        int got = 0;
+	AVSubtitle avsub;
+	int got = 0;
 
 	if (avcodec_decode_subtitle2(stream->dec_ctx, &avsub, &got, pkt) < 0 ||
 	    got == 0)
 		return STOS_EINVAL;
-        stos_subtitle_fix_timings(&avsub, pkt);
-        enum stos_error status = stos_convert_sub(dst, &avsub);
-        avsubtitle_free(&avsub);
-        return status;
+	stos_subtitle_fix_timings(&avsub, pkt);
+	enum stos_error status = stos_convert_sub(dst, &avsub);
+	avsubtitle_free(&avsub);
+	return status;
 }
 
 /* convert a stream to it's separate subtitles */
@@ -240,8 +239,8 @@ static enum stos_error stos_convert_stream(struct subtitle **dst,
 			break;
 		}
 
-                if (pkt->stream_index != istream->stream->index)
-                        goto cleanup_and_loop;
+		if (pkt->stream_index != istream->stream->index)
+			goto cleanup_and_loop;
 
 		if (count == size) {
 			size_t new_size = (size + 1) * 2;
@@ -256,14 +255,14 @@ static enum stos_error stos_convert_stream(struct subtitle **dst,
 		}
 
 		status = stos_convert_packet(subs + count, pkt, istream);
-                if (status == STOS_OK)
-                        count += 1;
-        cleanup_and_loop:
+		if (status == STOS_OK)
+			count += 1;
+cleanup_and_loop:
 		av_packet_unref(pkt);
 	}
 	if (status == STOS_OK)
 		goto cleanup;
-        stos_destroy_subs(subs, count);
+	stos_destroy_subs(subs, count);
 	free(subs);
 	subs = NULL;
 	count = 0;
@@ -272,8 +271,8 @@ cleanup:
 		*dst = subs;
 	if (num_subs != NULL)
 		*num_subs = count;
-        else
-                free(subs);
+	else
+		free(subs);
 	av_packet_free(&pkt);
 	return status;
 }
@@ -284,13 +283,13 @@ int stos_find_istream(const struct ifile *file,
 		      int (*predicate)(const AVStream *))
 {
 	const int max = file->fctx->nb_streams >= INT_MAX ?
-					 INT_MAX :
-					 file->fctx->nb_streams;
+				INT_MAX :
+				file->fctx->nb_streams;
 	for (int idx = 0; idx < max; ++idx) {
-                if (predicate(file->fctx->streams[idx]))
-                        return idx;
-        }
-        return -1;
+		if (predicate(file->fctx->streams[idx]))
+			return idx;
+	}
+	return -1;
 }
 
 /* get a initialized struct istream */
@@ -316,7 +315,7 @@ stos_get_istream(struct istream *dst, const struct ifile *file, int stream_idx)
 	if (avcodec_open2(dec_ctx, codec, &opts))
 		goto cleanup_decoder;
 
-        status = STOS_OK;
+	status = STOS_OK;
 
 	struct istream istream = { .stream = stream,
 				   .codec = codec,
@@ -324,8 +323,8 @@ stos_get_istream(struct istream *dst, const struct ifile *file, int stream_idx)
 
 	if (dst != NULL) {
 		*dst = istream;
-                goto cleanup_dictionary;
-        }
+		goto cleanup_dictionary;
+	}
 cleanup_decoder:
 	if (dec_ctx != NULL)
 		avcodec_free_context(&dec_ctx);
@@ -337,7 +336,7 @@ cleanup_dictionary:
 
 void stos_destroy_istream(struct istream *istream)
 {
-        avcodec_free_context(&istream->dec_ctx);
+	avcodec_free_context(&istream->dec_ctx);
 }
 
 static int stos_is_sub(const AVStream *stream)
@@ -362,20 +361,20 @@ static int stos_is_sub(const AVStream *stream)
 
 enum stos_error stos_open(struct ifile *file, const char *url)
 {
-        /* TODO check if path is a dir */
-        file->fctx = NULL;
-        if (avformat_open_input(&file->fctx, url, NULL, NULL) < 0)
-                return STOS_EINVAL;
-        if (avformat_find_stream_info(file->fctx, NULL) < 0) {
-                avformat_close_input(&file->fctx);
-                return STOS_UNSUP;
-        }
-        return STOS_OK;
+	/* TODO check if path is a dir */
+	file->fctx = NULL;
+	if (avformat_open_input(&file->fctx, url, NULL, NULL) < 0)
+		return STOS_EINVAL;
+	if (avformat_find_stream_info(file->fctx, NULL) < 0) {
+		avformat_close_input(&file->fctx);
+		return STOS_UNSUP;
+	}
+	return STOS_OK;
 }
 
-void stos_close(struct ifile *file) 
+void stos_close(struct ifile *file)
 {
-        avformat_close_input(&file->fctx);
+	avformat_close_input(&file->fctx);
 }
 
 /* convert subtitle stream stream_idx to struct subtitle array */
@@ -385,7 +384,7 @@ enum stos_error stos_convert_file(struct subtitle **dst, size_t *num_subs,
 {
 	if (stream_idx < 0)
 		stream_idx = stos_find_istream(file, stos_is_sub);
- 
+
 	struct istream stream;
 	enum stos_error status = STOS_OK;
 
