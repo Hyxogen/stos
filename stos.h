@@ -18,13 +18,18 @@
 #define STOS_H
 
 #include <stddef.h>
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
 
 enum stos_error
 {
 	STOS_OK = 0,
 	STOS_EINVAL,
 	STOS_ENOMEM,
-	STOS_UNSUP
+	STOS_UNSUP,
+        STOS_EIO,
+        STOS_ENOSUB,
+        STOS_EUNKNOWN
 };
 
 enum rect_type
@@ -48,7 +53,24 @@ struct subtitle
 	struct rect *rects;
 };
 
+struct ifile
+{
+        AVFormatContext *fctx;
+};
+
+struct istream
+{
+        AVStream *stream;
+        AVCodecContext *dec_ctx;
+        const AVCodec *codec;
+};
+
+const char *stos_get_error(enum stos_error error);
 void stos_destroy_rect(struct rect *rect);
 void stos_destroy_sub(struct subtitle *sub);
-
+void stos_destroy_subs(struct subtitle *sub, size_t n);
+enum stos_error stos_open(struct ifile *file, const char *url);
+void stos_close(struct ifile *file);
+enum stos_error stos_convert_file(struct subtitle **dst, size_t *num_subs,
+				  int stream_idx, struct ifile *file);
 #endif

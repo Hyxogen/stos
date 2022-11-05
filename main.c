@@ -23,19 +23,15 @@
 #include <stos.h>
 #include <stdlib.h>
 
-//todo fix extracting subtitles out of video files
-//	maybe this can be fixed by using a parser?
 int main(int argc, char **argv) 
 {
-	struct file_info info;
-	enum stos_error error;
-	
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s <in_file>\n", argv[0]);
 		return EXIT_FAILURE;
 	}
-	error = get_file_info(&info, argv[1]);
-	if (error != STOS_SUCCESS) {
+        struct ifile file;
+	enum stos_error error = stos_open(&file, argv[1]);
+	if (error != STOS_OK) {
 		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error(error));
 		return EXIT_FAILURE;
 	}
@@ -44,8 +40,8 @@ int main(int argc, char **argv)
 	size_t n = 0;
 	int status = EXIT_SUCCESS;
 
-	error = get_subs(&subs, &info, -1, &n);
-	if (error != STOS_SUCCESS) {
+	error = stos_convert_file(&subs, &n, -1, &file);
+	if (error != STOS_OK) {
 		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error(error));
 		status = EXIT_FAILURE;
 		goto cleanup;
@@ -53,15 +49,18 @@ int main(int argc, char **argv)
 	
 	for (size_t sub_idx = 0; sub_idx < n; ++sub_idx) {
 		const struct subtitle *sub = &subs[sub_idx];
-		for (size_t txt_idx = 0; txt_idx < sub->num_text; ++txt_idx) {
+		for (size_t rect_idx = 0; rect_idx < sub->num_rects;
+		     ++rect_idx) {
 			fprintf(stdout, "%u-%u: %s\n", sub->start_time,
-				sub->end_time, sub->text[txt_idx]);
+				sub->end_time, sub->rects[rect_idx].text);
 		}
 	}
 
  cleanup:
-	if (subs != NULL)
-		del_subs(subs, n);
-	del_file_info(&info);
+	if (subs != NULL) {
+                stos_destroy_subs(subs, n);
+                free(subs);
+        }
+	stos_close(&file);
 	return status;
 }

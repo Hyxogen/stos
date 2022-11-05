@@ -32,6 +32,14 @@ void stos_destroy_sub(struct subtitle *sub)
 	free(sub->rects);
 }
 
+/* destroy n subtitles in an array */
+void stos_destroy_subs(struct subtitle *sub, size_t n)
+{
+        for (size_t i = 0; i < n; ++i) {
+                stos_destroy_sub(sub + i);
+        }
+}
+
 /* perform strchr(strchr(...) + 1, ch) n times */
 static char *stos_nstrchr(const char *str, int ch, size_t n)
 {
@@ -40,6 +48,28 @@ static char *stos_nstrchr(const char *str, int ch, size_t n)
 		str += (n != 0);
 	}
 	return (char *)str;
+}
+
+/* retrieve human readable string of an error */
+const char *stos_get_error(enum stos_error error) 
+{
+        switch (error) {
+        case STOS_OK:
+                return "no error";
+        case STOS_EINVAL:
+                return "an invalid argument was passed";
+        case STOS_ENOMEM:
+                return "the process ran out of memory";
+        case STOS_UNSUP:
+                return "format is not supported";
+        case STOS_EIO:
+                return "could not properly read from file";
+        case STOS_ENOSUB:
+                return "could not retrieve subtitle stream";
+        case STOS_EUNKNOWN:
+        default:
+                return "an unknown error ocurred, please report this";
+        }
 }
 
 /* extract the text part out of an ass event without the style */
@@ -130,6 +160,7 @@ static enum stos_error stos_convert_rect(struct rect *dst,
 	}
 }
 
+/* convert an AVSubtitle to a struct subtitle */
 static enum stos_error stos_convert_sub(struct subtitle *dst,
 					const AVSubtitle *sub)
 {
@@ -154,5 +185,214 @@ static enum stos_error stos_convert_sub(struct subtitle *dst,
 	return STOS_OK;
 error:
 	stos_destroy_sub(dst);
+	return status;
+}
+
+/* insert possibly missing subtitle start and end times */
+void stos_subtitle_fix_timings(AVSubtitle *sub, const AVPacket *pkt)
+{
+        if (pkt->dts != AV_NOPTS_VALUE) {
+                sub->start_display_time = pkt->dts;
+                sub->end_display_time = pkt->pts;
+        }
+}
+
+/* convert a packet from a subtitle stream to a struct subtitle */
+static enum stos_error stos_convert_packet(struct subtitle *dst,
+					   AVPacket *pkt,
+                                           struct istream *stream)
+{
+        AVSubtitle avsub;
+        int got = 0;
+
+	if (avcodec_decode_subtitle2(stream->dec_ctx, &avsub, &got, pkt) < 0 ||
+	    got == 0)
+		return STOS_EINVAL;
+        stos_subtitle_fix_timings(&avsub, pkt);
+        enum stos_error status = stos_convert_sub(dst, &avsub);
+        avsubtitle_free(&avsub);
+        return status;
+}
+
+/* convert a stream to it's separate subtitles */
+static enum stos_error stos_convert_stream(struct subtitle **dst,
+					   size_t *num_subs,
+					   struct istream *istream,
+					   struct ifile *file)
+{
+	AVPacket *pkt = av_packet_alloc();
+
+	if (pkt == NULL)
+		return STOS_ENOMEM;
+
+	struct subtitle *subs = NULL;
+	size_t count = 0;
+	size_t size = 0;
+
+	enum stos_error status = STOS_OK;
+	int rc = 0;
+	while (status == STOS_OK) {
+		rc = av_read_frame(file->fctx, pkt);
+		if (rc < 0 && rc != AVERROR_EOF) {
+			status = STOS_EIO;
+			break;
+		} else if (rc == AVERROR_EOF) {
+			break;
+		}
+
+                if (pkt->stream_index != istream->stream->index)
+                        goto cleanup_and_loop;
+
+		if (count == size) {
+			size_t new_size = (size + 1) * 2;
+			struct subtitle *new_subs =
+				realloc(subs, new_size * sizeof(*subs));
+			if (new_subs == NULL) {
+				status = STOS_ENOMEM;
+				break;
+			}
+			subs = new_subs;
+			size = new_size;
+		}
+
+		status = stos_convert_packet(subs + count, pkt, istream);
+                if (status == STOS_OK)
+                        count += 1;
+        cleanup_and_loop:
+		av_packet_unref(pkt);
+	}
+	if (status == STOS_OK)
+		goto cleanup;
+        stos_destroy_subs(subs, count);
+	free(subs);
+	subs = NULL;
+	count = 0;
+cleanup:
+	if (subs != NULL)
+		*dst = subs;
+	if (num_subs != NULL)
+		*num_subs = count;
+        else
+                free(subs);
+	av_packet_free(&pkt);
+	return status;
+}
+
+/* find the first stream that matches a predicate */
+/* returns -1 on no stream found matching the predicate */
+int stos_find_istream(const struct ifile *file,
+		      int (*predicate)(const AVStream *))
+{
+	const int max = file->fctx->nb_streams >= INT_MAX ?
+					 INT_MAX :
+					 file->fctx->nb_streams;
+	for (int idx = 0; idx < max; ++idx) {
+                if (predicate(file->fctx->streams[idx]))
+                        return idx;
+        }
+        return -1;
+}
+
+/* get a initialized struct istream */
+static enum stos_error
+stos_get_istream(struct istream *dst, const struct ifile *file, int stream_idx)
+{
+	if (stream_idx < 0 || (unsigned int)stream_idx > file->fctx->nb_streams)
+		return STOS_ENOSUB;
+
+	AVStream *stream = file->fctx->streams[(unsigned int)stream_idx];
+	const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id);
+	if (codec == NULL)
+		return STOS_UNSUP;
+
+	AVCodecContext *dec_ctx = avcodec_alloc_context3(codec);
+	if (dec_ctx == NULL)
+		return STOS_ENOMEM;
+
+	enum stos_error status = STOS_EUNKNOWN;
+	AVDictionary *opts = NULL;
+	if (av_dict_set(&opts, "", "", 0) < 0)
+		goto cleanup_decoder;
+	if (avcodec_open2(dec_ctx, codec, &opts))
+		goto cleanup_decoder;
+
+        status = STOS_OK;
+
+	struct istream istream = { .stream = stream,
+				   .codec = codec,
+				   .dec_ctx = dec_ctx };
+
+	if (dst != NULL) {
+		*dst = istream;
+                goto cleanup_dictionary;
+        }
+cleanup_decoder:
+	if (dec_ctx != NULL)
+		avcodec_free_context(&dec_ctx);
+cleanup_dictionary:
+	if (opts != NULL)
+		av_dict_free(&opts);
+	return status;
+}
+
+void stos_destroy_istream(struct istream *istream)
+{
+        avcodec_free_context(&istream->dec_ctx);
+}
+
+static int stos_is_sub(const AVStream *stream)
+{
+	enum AVCodecID id = stream->codecpar->codec_id;
+	return id == AV_CODEC_ID_DVD_SUBTITLE ||
+	       id == AV_CODEC_ID_DVB_SUBTITLE || id == AV_CODEC_ID_TEXT ||
+	       id == AV_CODEC_ID_XSUB || id == AV_CODEC_ID_SSA ||
+	       id == AV_CODEC_ID_MOV_TEXT ||
+	       id == AV_CODEC_ID_HDMV_PGS_SUBTITLE ||
+	       id == AV_CODEC_ID_DVB_TELETEXT || id == AV_CODEC_ID_SRT ||
+	       id == AV_CODEC_ID_MICRODVD || id == AV_CODEC_ID_EIA_608 ||
+	       id == AV_CODEC_ID_JACOSUB || id == AV_CODEC_ID_SAMI ||
+	       id == AV_CODEC_ID_REALTEXT || id == AV_CODEC_ID_STL ||
+	       id == AV_CODEC_ID_SUBVIEWER1 || id == AV_CODEC_ID_SUBVIEWER ||
+	       id == AV_CODEC_ID_SUBRIP || id == AV_CODEC_ID_WEBVTT ||
+	       id == AV_CODEC_ID_MPL2 || id == AV_CODEC_ID_VPLAYER ||
+	       id == AV_CODEC_ID_PJS || id == AV_CODEC_ID_ASS ||
+	       id == AV_CODEC_ID_HDMV_TEXT_SUBTITLE || id == AV_CODEC_ID_TTML ||
+	       id == AV_CODEC_ID_ARIB_CAPTION;
+}
+
+enum stos_error stos_open(struct ifile *file, const char *url)
+{
+        /* TODO check if path is a dir */
+        file->fctx = NULL;
+        if (avformat_open_input(&file->fctx, url, NULL, NULL) < 0)
+                return STOS_EINVAL;
+        if (avformat_find_stream_info(file->fctx, NULL) < 0) {
+                avformat_close_input(&file->fctx);
+                return STOS_UNSUP;
+        }
+        return STOS_OK;
+}
+
+void stos_close(struct ifile *file) 
+{
+        avformat_close_input(&file->fctx);
+}
+
+/* convert subtitle stream stream_idx to struct subtitle array */
+/* this function will select the first subtitle stream if stream_idx < 0 */
+enum stos_error stos_convert_file(struct subtitle **dst, size_t *num_subs,
+				  int stream_idx, struct ifile *file)
+{
+	if (stream_idx < 0)
+		stream_idx = stos_find_istream(file, stos_is_sub);
+ 
+	struct istream stream;
+	enum stos_error status = STOS_OK;
+
+	status = stos_get_istream(&stream, file, stream_idx);
+	if (status == STOS_OK) {
+		status = stos_convert_stream(dst, num_subs, &stream, file);
+		stos_destroy_istream(&stream);
+	}
 	return status;
 }

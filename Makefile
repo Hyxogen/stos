@@ -2,7 +2,7 @@ TARGET		:= stos
 
 CC		:= cc
 
-SOURCE_FILES	:= main.c sub.c stos_util.c
+SOURCE_FILES	:= main.c sub_new.c
 OBJECT_FILES	:= $(SOURCE_FILES:.c=.o)
 DEPEND_FILES	:= $(SOURCE_FILES:.c=.d)
 
