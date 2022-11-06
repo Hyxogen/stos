@@ -235,7 +235,7 @@ static enum stos_error stos_convert_stream(struct subtitle **dst,
 
 	enum stos_error status = STOS_OK;
 	while (status == STOS_OK) {
-		int rc = av_read_frame(file->fctx, pkt);
+		const int rc = av_read_frame(file->fctx, pkt);
 		if (rc < 0 && rc != AVERROR_EOF) {
 			status = STOS_EREAD_FRAME;
 			break;
