@@ -30,11 +30,11 @@ WARNINGS	:= -Wall -Wextra -std=c99 -pedantic \
 		   -Widiomatic-parentheses -Wunreachable-code-aggressive \
 		   -Wthread-safety
 INCLUDE_DIRS	:= -I..
-SANITIZERS	:= -fsanitize=address,undefined,integer
-CFLAGS		:= -O2 -g $(SANITIZERS) $(WARNINGS) $(INCLUDE_DIRS) -MMD -MP
-LFLAGS		:= -flto $(SANITIZERS)
+SANITIZERS	:= -fsanitize=fuzzer,address,undefined,integer -fprofile-instr-generate -fcoverage-mapping
+CFLAGS		:= -O1 -g $(SANITIZERS) $(WARNINGS) $(INCLUDE_DIRS) -MMD -MP
+LFLAGS		:= $(SANITIZERS) -lavcodec -lavformat -lavutil -fprofile-instr-generate -fcoverage-mapping
 
-CFILES		:= ass_extract_fuzz.c
+CFILES		:= fuzz.c
 HEADER_DEPS	:= $(CFILES:.c=.d)
 OBJ_FILES	:= $(CFILES:.c=.o)
 
