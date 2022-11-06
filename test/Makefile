@@ -26,8 +26,8 @@ WARNINGS	:= -Wall -Wextra -std=c99 -pedantic \
 		   -Widiomatic-parentheses -Wunreachable-code-aggressive \
 		   -Wthread-safety
 INCLUDE_DIRS	:= -I..
-CFLAGS		:= -O2 -g $(WARNINGS) $(INCLUDE_DIRS) -MMD -MP
-
+CFLAGS		:= -O2 -g3 $(WARNINGS) $(INCLUDE_DIRS) -MMD -MP
+LFLAGS		:= -lavcodec -lavformat -lavutil
 CFILES		:= $(shell find . -type f -name '*.c')
 HEADER_DEPS	:= $(CFILES:.c=.d)
 TSTFILES	:= $(addsuffix .mem.out,$(CFILES)) \
@@ -68,16 +68,16 @@ testdrivers: $(TSTFILES)
 
 -include $(HEADER_DEPS)
 %.c.mem.out: %.c Makefile
-	$(CC) $(CFLAGS) -fsanitize=memory -o $@ $<
+	$(CC) $(CFLAGS) -fsanitize=memory -o $@ $< $(LFLAGS)
 
 -include $(HEADER_DEPS)
 %.c.addr.out: %.c Makefile
-	$(CC) $(CFLAGS) -fsanitize=address,undefined,integer -o $@ $<
+	$(CC) $(CFLAGS) -fsanitize=address,undefined,integer -o $@ $< $(LFLAGS)
 
 -include $(HEADER_DEPS)
 %.c.static.out: %.c Makefile
 	scan-build -analyze-headers --status-bugs \
-		-enable-checker alpha.security $(CC) $(INCLUDE_DIRS) -O2 -g -o $@ $<
+		-enable-checker alpha.security $(CC) $(INCLUDE_DIRS) -O2 -g -o $@ $< $(LFLAGS)
 
 .PHONY: clean
 clean:
