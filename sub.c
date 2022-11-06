@@ -241,7 +241,7 @@ static enum stos_error stos_convert_stream(struct subtitle **dst,
 			status = STOS_EREAD_FRAME;
 			break;
 		} else if (rc == AVERROR_EOF) {
-			goto cleanup;
+                        break;
 		}
 
 		if (pkt->stream_index != istream->stream->index)
@@ -265,10 +265,8 @@ static enum stos_error stos_convert_stream(struct subtitle **dst,
 loop:
 		av_packet_unref(pkt);
 	}
-	dst = NULL;
-cleanup:
 	av_packet_free(&pkt);
-	if (dst != NULL) {
+	if (dst != NULL && status == STOS_OK) {
 		*dst = subs;
 	} else {
 		stos_destroy_subs(subs, count);
