@@ -23,28 +23,20 @@
 /*
   TODO
   - write unit tests for subtitle extraction
-  - write fuzz tests for subtitle extraction */
-int main(int argc, char **argv) 
-{
-	if (argc != 2) {
-		fprintf(stderr, "usage: %s <in_file>\n", argv[0]);
-		return EXIT_FAILURE;
-	}
-        struct ifile file;
-	enum stos_error error = stos_open(&file, argv[1]);
-	if (error != STOS_OK) {
-		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error(error));
-		return EXIT_FAILURE;
-	}
-	
-	struct subtitle *subs = NULL;
-	size_t n = 0;
-	int status = EXIT_SUCCESS;
+  - write fuzz tests for subtitle extraction
+  - return more explicit error codes */
 
-	error = stos_convert_file(&subs, &n, -1, &file);
+int print_subs(struct ifile *file, int stream_idx)
+{
+        struct subtitle *subs = NULL;
+	size_t n = 0;
+	int status = 0;
+        enum stos_error error;
+
+	error = stos_convert_file(&subs, &n, stream_idx, file);
 	if (error != STOS_OK) {
-		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error(error));
-		status = EXIT_FAILURE;
+		fprintf(stderr, "%s\n", stos_get_error(error));
+		status = -1;
 		goto cleanup;
 	}
 	
@@ -62,6 +54,25 @@ int main(int argc, char **argv)
                 stos_destroy_subs(subs, n);
                 free(subs);
         }
-	stos_close(&file);
 	return status;
+}
+
+int main(int argc, char **argv) 
+{
+	if (argc != 2) {
+		fprintf(stderr, "usage: %s <in_file>\n", argv[0]);
+		return EXIT_FAILURE;
+	}
+        struct ifile file;
+	enum stos_error error = stos_open(&file, argv[1]);
+	if (error != STOS_OK) {
+		fprintf(stderr, "%s: %s\n", argv[1], stos_get_error(error));
+		return EXIT_FAILURE;
+	}
+
+        int status = EXIT_SUCCESS;
+        if (print_subs(&file, -1) < 0)
+                status = EXIT_FAILURE;
+        stos_close(&file);
+        return status;
 }
