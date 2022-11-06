@@ -4,6 +4,7 @@
 
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
         struct ifile file;
+        av_log_set_level(AV_LOG_QUIET);
         enum stos_error error = stos_blob(&file, Data, Size);
         if (error != STOS_OK)
                 return 0;
