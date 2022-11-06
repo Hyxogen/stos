@@ -375,18 +375,19 @@ enum stos_error stos_open(struct ifile *file, const char *url)
 	return STOS_OK;
 }
 
-static int stos_read_packet(void *opaque, unsigned char *buf, int buf_size)
+static int stos_read_packet(void *opaque, unsigned char *buf, int buf_ssize)
 {
         struct buffer *data = (struct buffer *) opaque;
-        if (data->size < (unsigned int) buf_size)
-                buf_size = data->size;
+        unsigned int buf_size = (unsigned int) buf_ssize;
+        if (data->size < buf_size)
+                buf_size = (unsigned int) data->size;
 
         if (buf_size == 0)
                 return AVERROR_EOF;
         memcpy(buf, data->ptr, buf_size);
         data->ptr += buf_size;
         data->size -= buf_size;
-        return buf_size;
+        return (int) buf_size;
 }
 
 enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size)
