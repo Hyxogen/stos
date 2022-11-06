@@ -433,9 +433,9 @@ enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size)
 error:
         if (file->fctx != NULL)
                 avformat_free_context(file->fctx);
-        free(avio_buffer);
         if (avio_ctx != NULL)
-                avio_context_free(&avio_ctx);
+                av_freep(&avio_ctx->buffer);
+        avio_context_free(&avio_ctx);
         return status;
 }
 
