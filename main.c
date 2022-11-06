@@ -13,16 +13,17 @@
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with this program.  If not, see
-// <https://www.gnu.org/licenses/>.
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
-#include "libavcodec/avcodec.h"
-#include "libavformat/avformat.h"
 #include <stos.h>
 #include <stdlib.h>
 
+/*
+  TODO
+  - write unit tests for subtitle extraction
+  - write fuzz tests for subtitle extraction */
 int main(int argc, char **argv) 
 {
 	if (argc != 2) {
