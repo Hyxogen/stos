@@ -192,8 +192,8 @@ error:
 void stos_subtitle_fix_timings(AVSubtitle *sub, const AVPacket *pkt)
 {
 	if (pkt->dts != AV_NOPTS_VALUE) {
-		sub->start_display_time = pkt->dts;
-		sub->end_display_time = pkt->pts;
+		sub->start_display_time = (uint32_t) pkt->dts;
+		sub->end_display_time = (uint32_t) pkt->pts;
 	}
 }
 
@@ -284,7 +284,7 @@ int stos_find_istream(const struct ifile *file,
 {
 	const int max = file->fctx->nb_streams >= INT_MAX ?
 				INT_MAX :
-				file->fctx->nb_streams;
+				(int)file->fctx->nb_streams;
 	for (int idx = 0; idx < max; ++idx) {
 		if (predicate(file->fctx->streams[idx]))
 			return idx;
