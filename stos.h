@@ -36,6 +36,7 @@ enum stos_error
 	STOS_UNSUP,
         STOS_EIO,
         STOS_EDECODE,
+        STOS_EREAD_FRAME,
         STOS_EBADF,
         STOS_ENOSUB,
         STOS_EUNKNOWN
