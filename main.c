@@ -20,12 +20,6 @@
 #include <stos.h>
 #include <stdlib.h>
 
-/*
-  TODO
-  - write unit tests for subtitle extraction
-  - write fuzz tests for subtitle extraction
-  - return more explicit error codes */
-
 int print_subs(struct ifile *file, int stream_idx)
 {
         struct subtitle *subs = NULL;
