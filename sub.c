@@ -66,6 +66,10 @@ const char *stos_get_error(enum stos_error error)
 		return "could not properly read from file";
 	case STOS_ENOSUB:
 		return "could not retrieve subtitle stream";
+        case STOS_EDECODE:
+                return "could not decode a packet from a stream";
+        case STOS_EBADF:
+                return "could not open the file";
 	case STOS_EUNKNOWN:
 	default:
 		return "an unknown error ocurred, please report this";
@@ -156,7 +160,7 @@ static enum stos_error stos_convert_rect(struct rect *dst,
 		return stos_convert_ass_rect(dst, rect);
 	case SUBTITLE_NONE:
 	default:
-		return STOS_EINVAL;
+		return STOS_UNSUP;
 	}
 }
 
@@ -206,7 +210,7 @@ static enum stos_error stos_convert_packet(struct subtitle *dst, AVPacket *pkt,
 
 	if (avcodec_decode_subtitle2(stream->dec_ctx, &avsub, &got, pkt) < 0 ||
 	    got == 0)
-		return STOS_EINVAL;
+		return STOS_EDECODE;
 	stos_subtitle_fix_timings(&avsub, pkt);
 	enum stos_error status = stos_convert_sub(dst, &avsub);
 	avsubtitle_free(&avsub);
@@ -367,10 +371,10 @@ enum stos_error stos_open(struct ifile *file, const char *url)
         file->isblob = 0;
 	file->fctx = NULL;
 	if (avformat_open_input(&file->fctx, url, NULL, NULL) < 0)
-		return STOS_EINVAL;
+		return STOS_EBADF;
 	if (avformat_find_stream_info(file->fctx, NULL) < 0) {
 		avformat_close_input(&file->fctx);
-		return STOS_UNSUP;
+		return STOS_EIO;
 	}
 	return STOS_OK;
 }
