@@ -219,7 +219,7 @@ static enum stos_error stos_convert_packet(struct subtitle *dst, AVPacket *pkt,
 	return status;
 }
 
-/* convert a stream to it's separate subtitles */
+/* convert a stream to its separate subtitles */
 static enum stos_error stos_convert_stream(struct subtitle **dst,
 					   size_t *num_subs,
 					   struct istream *istream,
