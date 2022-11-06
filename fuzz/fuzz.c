@@ -15,5 +15,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
                 stos_destroy_subs(subs, n);
                 free(subs);
         }
+        stos_close(&file);
         return 0;
 }
