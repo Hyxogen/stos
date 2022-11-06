@@ -1,4 +1,4 @@
-#include <sub_new.c>
+#include <sub.c>
 #include <assert.h>
 #include <string.h>
 

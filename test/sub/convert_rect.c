@@ -14,7 +14,7 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-#include <sub_new.c>
+#include <sub.c>
 #include <assert.h>
 #include <stddef.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-#include <sub_new.c>
+#include <sub.c>
 
 #include <stddef.h>
 #include <string.h>
