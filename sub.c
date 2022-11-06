@@ -405,15 +405,15 @@ enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size)
         enum stos_error status = STOS_OK;
 
         unsigned char *avio_buffer = av_malloc(STOS_AVIO_BUFFER_SIZE);
+        AVIOContext *avio_ctx = NULL;
         if (avio_buffer == NULL) {
                 status = STOS_ENOMEM;
                 goto error;
         }
 
-	AVIOContext *avio_ctx =
-		avio_alloc_context(avio_buffer, STOS_AVIO_BUFFER_SIZE, 0, &data,
-				   &stos_read_packet, NULL, NULL);
-        if (avio_ctx == NULL) {
+	avio_ctx = avio_alloc_context(avio_buffer, STOS_AVIO_BUFFER_SIZE, 0,
+				      &data, &stos_read_packet, NULL, NULL);
+	if (avio_ctx == NULL) {
                 status = STOS_ENOMEM;
                 goto error;
         }
