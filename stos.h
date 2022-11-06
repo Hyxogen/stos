@@ -21,6 +21,13 @@
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 
+#ifndef STOS_AVIO_BUFFER_SIZE
+# define STOS_AVIO_BUFFER_SIZE 4096
+#endif
+#if STOS_AVIO_BUFFER_SIZE < 0
+# error "STOS_AVIO_BUFFER_SIZE must be a positive integer"
+#endif
+
 enum stos_error
 {
 	STOS_OK = 0,
@@ -53,9 +60,16 @@ struct subtitle
 	struct rect *rects;
 };
 
+struct buffer
+{
+        const unsigned char *ptr;
+        size_t size;
+};
+
 struct ifile
 {
         AVFormatContext *fctx;
+        int isblob;
 };
 
 struct istream
@@ -70,6 +84,7 @@ void stos_destroy_rect(struct rect *rect);
 void stos_destroy_sub(struct subtitle *sub);
 void stos_destroy_subs(struct subtitle *sub, size_t n);
 enum stos_error stos_open(struct ifile *file, const char *url);
+enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size);
 void stos_close(struct ifile *file);
 enum stos_error stos_convert_file(struct subtitle **dst, size_t *num_subs,
 				  int stream_idx, struct ifile *file);

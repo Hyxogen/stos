@@ -307,6 +307,8 @@ stos_get_istream(struct istream *dst, const struct ifile *file, int stream_idx)
 	AVCodecContext *dec_ctx = avcodec_alloc_context3(codec);
 	if (dec_ctx == NULL)
 		return STOS_ENOMEM;
+        dec_ctx->thread_count = 12;
+        dec_ctx->thread_type = FF_THREAD_FRAME;
 
 	enum stos_error status = STOS_EUNKNOWN;
 	AVDictionary *opts = NULL;
@@ -362,6 +364,7 @@ static int stos_is_sub(const AVStream *stream)
 enum stos_error stos_open(struct ifile *file, const char *url)
 {
 	/* TODO check if path is a dir */
+        file->isblob = 0;
 	file->fctx = NULL;
 	if (avformat_open_input(&file->fctx, url, NULL, NULL) < 0)
 		return STOS_EINVAL;
@@ -372,8 +375,76 @@ enum stos_error stos_open(struct ifile *file, const char *url)
 	return STOS_OK;
 }
 
+static int stos_read_packet(void *opaque, unsigned char *buf, int buf_size)
+{
+        struct buffer *data = (struct buffer *) opaque;
+        if (data->size < (unsigned int) buf_size)
+                buf_size = data->size;
+
+        if (buf_size == 0)
+                return AVERROR_EOF;
+        memcpy(buf, data->ptr, buf_size);
+        data->ptr += buf_size;
+        data->size -= buf_size;
+        return buf_size;
+}
+
+enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size)
+{
+        file->isblob = 1;
+        file->fctx = avformat_alloc_context();
+        if (file->fctx == NULL)
+                return STOS_ENOMEM;
+
+        struct buffer data = {
+                .ptr = buffer,
+                .size = size,
+        };
+
+        enum stos_error status = STOS_OK;
+
+        unsigned char *avio_buffer = av_malloc(STOS_AVIO_BUFFER_SIZE);
+        if (avio_buffer == NULL) {
+                status = STOS_ENOMEM;
+                goto error;
+        }
+
+	AVIOContext *avio_ctx =
+		avio_alloc_context(avio_buffer, STOS_AVIO_BUFFER_SIZE, 0, &data,
+				   &stos_read_packet, NULL, NULL);
+        if (avio_ctx == NULL) {
+                status = STOS_ENOMEM;
+                goto error;
+        }
+
+        file->fctx->pb = avio_ctx;
+
+        if (avformat_open_input(&file->fctx, NULL, NULL, NULL) < 0) {
+                status = STOS_EINVAL;
+                goto error;
+        }
+
+        if (avformat_find_stream_info(file->fctx, NULL) >= 0)
+                return STOS_OK;
+
+        avformat_close_input(&file->fctx);
+        status = STOS_EINVAL;
+error:
+        if (file->fctx != NULL)
+                avformat_free_context(file->fctx);
+        free(avio_buffer);
+        if (avio_ctx != NULL)
+                avio_context_free(&avio_ctx);
+        return status;
+}
+
 void stos_close(struct ifile *file)
 {
+	if (file->isblob) {
+		if (file->fctx->pb->buffer != NULL)
+			av_freep(&file->fctx->pb->buffer);
+		avio_context_free(&file->fctx->pb);
+	}
 	avformat_close_input(&file->fctx);
 }
 
