@@ -66,6 +66,8 @@ const char *stos_get_error(enum stos_error error)
 		return "could not properly read from file";
 	case STOS_ENOSUB:
 		return "could not retrieve subtitle stream";
+        case STOS_EREAD_FRAME:
+                return "could not read next frame of a stream";
         case STOS_EDECODE:
                 return "could not decode a packet from a stream";
         case STOS_EBADF:
@@ -224,7 +226,6 @@ static enum stos_error stos_convert_stream(struct subtitle **dst,
 					   struct ifile *file)
 {
 	AVPacket *pkt = av_packet_alloc();
-
 	if (pkt == NULL)
 		return STOS_ENOMEM;
 
@@ -232,52 +233,49 @@ static enum stos_error stos_convert_stream(struct subtitle **dst,
 	size_t count = 0;
 	size_t size = 0;
 
+	int rc;
 	enum stos_error status = STOS_OK;
-	int rc = 0;
 	while (status == STOS_OK) {
 		rc = av_read_frame(file->fctx, pkt);
 		if (rc < 0 && rc != AVERROR_EOF) {
-			status = STOS_EIO;
+			status = STOS_EREAD_FRAME;
 			break;
 		} else if (rc == AVERROR_EOF) {
-			break;
+			goto cleanup;
 		}
 
 		if (pkt->stream_index != istream->stream->index)
-			goto cleanup_and_loop;
+			goto loop;
 
 		if (count == size) {
 			size_t new_size = (size + 1) * 2;
-			struct subtitle *new_subs =
-				realloc(subs, new_size * sizeof(*subs));
+			struct subtitle *new_subs = realloc(
+				subs, new_size * sizeof(struct subtitle));
 			if (new_subs == NULL) {
 				status = STOS_ENOMEM;
 				break;
 			}
-			subs = new_subs;
 			size = new_size;
+			subs = new_subs;
 		}
 
-		status = stos_convert_packet(subs + count, pkt, istream);
-		if (status == STOS_OK)
-			count += 1;
-cleanup_and_loop:
+		if ((status = stos_convert_packet(subs + count, pkt,
+						  istream)) == STOS_OK)
+			count++;
+loop:
 		av_packet_unref(pkt);
 	}
-	if (status == STOS_OK)
-		goto cleanup;
-	stos_destroy_subs(subs, count);
-	free(subs);
-	subs = NULL;
-	count = 0;
+	dst = NULL;
 cleanup:
-	if (subs != NULL)
+	av_packet_free(&pkt);
+	if (dst != NULL) {
 		*dst = subs;
+	} else {
+		stos_destroy_subs(subs, count);
+		free(subs);
+	}
 	if (num_subs != NULL)
 		*num_subs = count;
-	else
-		free(subs);
-	av_packet_free(&pkt);
 	return status;
 }
 
