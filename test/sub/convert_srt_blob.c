@@ -23,14 +23,12 @@ int main() {
         const char *sub = "1\n00:00:00,000 --> 00:00:01,000\nこんにちは";
         assert(stos_blob(&file, sub, strlen(sub)) == STOS_OK);
 
-        struct subtitle *subs = NULL;
-        size_t n = 0;
-        assert(stos_convert_file(&subs, &n, -1, &file) == STOS_OK);
-        assert(n == 1);
-        assert(subs[0].num_rects == 1);
-        assert(strcmp(subs[0].rects[0].text, "こんにちは") == 0);
-        stos_destroy_sub(&subs[0]);
-        free(subs);
+        struct subtitle_list list;
+        assert(stos_convert_file(&list, -1, &file) == STOS_OK);
+        assert(list.count == 1);
+        assert(list.subs[0].num_rects == 1);
+        assert(strcmp(list.subs[0].rects[0].text, "こんにちは") == 0);
+	stos_destroy_sub_list(&list);
         stos_close(&file);
         return 0;
 }

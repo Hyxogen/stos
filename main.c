@@ -22,20 +22,19 @@
 
 int print_subs(struct ifile *file, int stream_idx)
 {
-        struct subtitle *subs = NULL;
-	size_t n = 0;
+        struct subtitle_list list;
 	int status = 0;
         enum stos_error error;
 
-	error = stos_convert_file(&subs, &n, stream_idx, file);
+	error = stos_convert_file(&list, stream_idx, file);
 	if (error != STOS_OK) {
 		fprintf(stderr, "%s\n", stos_get_error(error));
 		status = -1;
 		goto cleanup;
 	}
 	
-	for (size_t sub_idx = 0; sub_idx < n; ++sub_idx) {
-		const struct subtitle *sub = &subs[sub_idx];
+	for (size_t sub_idx = 0; sub_idx < list.count; ++sub_idx) {
+		const struct subtitle *sub = &list.subs[sub_idx];
 		for (size_t rect_idx = 0; rect_idx < sub->num_rects;
 		     ++rect_idx) {
 			fprintf(stdout, "%u-%u: %s\n", sub->start_time,
@@ -44,10 +43,7 @@ int print_subs(struct ifile *file, int stream_idx)
 	}
 
  cleanup:
-	if (subs != NULL) {
-                stos_destroy_subs(subs, n);
-                free(subs);
-        }
+	stos_destroy_sub_list(&list);
 	return status;
 }
 

@@ -32,12 +32,21 @@ void stos_destroy_sub(struct subtitle *sub)
 	free(sub->rects);
 }
 
-/* destroy n subtitles in an array */
-void stos_destroy_subs(struct subtitle *sub, size_t n)
+/* free resources of a subtitle list */
+void stos_destroy_sub_list(struct subtitle_list *list)
 {
-	for (size_t i = 0; i < n; ++i) {
-		stos_destroy_sub(sub + i);
+	for (size_t i = 0; i < list->count; ++i) {
+		stos_destroy_sub(list->subs + i);
 	}
+	free(list->subs);
+}
+
+/* initialize subtitle list with default values */
+void stos_init_sub_list(struct subtitle_list *list)
+{
+	list->subs = NULL;
+	list->count = 0;
+	list->size = 0;
 }
 
 /* perform strchr(strchr(...) + 1, ch) n times */
@@ -66,12 +75,12 @@ const char *stos_get_error(enum stos_error error)
 		return "could not properly read from file";
 	case STOS_ENOSUB:
 		return "could not retrieve subtitle stream";
-        case STOS_EREAD_FRAME:
-                return "could not read next frame of a stream";
-        case STOS_EDECODE:
-                return "could not decode a packet from a stream";
-        case STOS_EBADF:
-                return "could not open the file";
+	case STOS_EREAD_FRAME:
+		return "could not read next frame of a stream";
+	case STOS_EDECODE:
+		return "could not decode a packet from a stream";
+	case STOS_EBADF:
+		return "could not open the file";
 	case STOS_EUNKNOWN:
 	default:
 		return "an unknown error ocurred, please report this";
@@ -198,8 +207,8 @@ error:
 void stos_subtitle_fix_timings(AVSubtitle *sub, const AVPacket *pkt)
 {
 	if (pkt->dts != AV_NOPTS_VALUE) {
-		sub->start_display_time = (uint32_t) pkt->dts;
-		sub->end_display_time = (uint32_t) pkt->pts;
+		sub->start_display_time = (uint32_t)pkt->dts;
+		sub->end_display_time = (uint32_t)pkt->pts;
 	}
 }
 
@@ -219,60 +228,53 @@ static enum stos_error stos_convert_packet(struct subtitle *dst, AVPacket *pkt,
 	return status;
 }
 
-/* convert a stream to its separate subtitles */
-static enum stos_error stos_convert_stream(struct subtitle **dst,
-					   size_t *num_subs,
-					   struct istream *istream,
-					   struct ifile *file)
+/* convert a packet from a subtitle stream and add it to the subtitle list */
+static enum stos_error
+stos_process_subtitle(void *opaque, struct istream *stream, AVPacket *packet)
+{
+	struct subtitle_list *list = opaque;
+
+	if (list->count == list->size) {
+		size_t new_size = list->size == 0 ? 1 : list->size * 2;
+		struct subtitle *new_subs =
+			realloc(list->subs, new_size * sizeof(*list->subs));
+		if (new_subs == NULL)
+			return STOS_ENOMEM;
+		list->size = new_size;
+		list->subs = new_subs;
+	}
+
+	enum stos_error status =
+		stos_convert_packet(&list->subs[list->count], packet, stream);
+	list->count += 1;
+	return status;
+}
+
+/* call proc for each packet of istream */
+static enum stos_error stos_process_stream(
+	struct istream *istream, struct ifile *file,
+	enum stos_error (*proc)(void *, struct istream *stream, AVPacket *),
+	void *opaque)
 {
 	AVPacket *pkt = av_packet_alloc();
 	if (pkt == NULL)
 		return STOS_ENOMEM;
 
-	struct subtitle *subs = NULL;
-	size_t count = 0;
-	size_t size = 0;
-
+	int rc;
 	enum stos_error status = STOS_OK;
-	while (status == STOS_OK) {
-		const int rc = av_read_frame(file->fctx, pkt);
-		if (rc < 0 && rc != AVERROR_EOF) {
-			status = STOS_EREAD_FRAME;
-			break;
-		} else if (rc == AVERROR_EOF) {
-                        break;
-		}
-
+	while ((rc = av_read_frame(file->fctx, pkt)) >= 0) {
 		if (pkt->stream_index != istream->stream->index)
 			goto loop;
 
-		if (count == size) {
-			size_t new_size = (size + 1) * 2;
-			struct subtitle *new_subs = realloc(
-				subs, new_size * sizeof(struct subtitle));
-			if (new_subs == NULL) {
-				status = STOS_ENOMEM;
-				break;
-			}
-			size = new_size;
-			subs = new_subs;
-		}
-
-		if ((status = stos_convert_packet(subs + count, pkt,
-						  istream)) == STOS_OK)
-			count++;
+		status = proc(opaque, istream, pkt);
 loop:
 		av_packet_unref(pkt);
+		if (status != STOS_OK)
+			break;
 	}
 	av_packet_free(&pkt);
-	if (dst != NULL && status == STOS_OK) {
-		*dst = subs;
-	} else {
-		stos_destroy_subs(subs, count);
-		free(subs);
-	}
-	if (num_subs != NULL)
-		*num_subs = count;
+	if (rc < 0 && rc != AVERROR_EOF)
+		status = STOS_EREAD_FRAME;
 	return status;
 }
 
@@ -306,8 +308,8 @@ stos_get_istream(struct istream *dst, const struct ifile *file, int stream_idx)
 	AVCodecContext *dec_ctx = avcodec_alloc_context3(codec);
 	if (dec_ctx == NULL)
 		return STOS_ENOMEM;
-        dec_ctx->thread_count = 12;
-        dec_ctx->thread_type = FF_THREAD_FRAME;
+	dec_ctx->thread_count = 12;
+	dec_ctx->thread_type = FF_THREAD_FRAME;
 
 	enum stos_error status = STOS_EUNKNOWN;
 	AVDictionary *opts = NULL;
@@ -363,7 +365,7 @@ static int stos_is_sub(const AVStream *stream)
 enum stos_error stos_open(struct ifile *file, const char *url)
 {
 	/* TODO check if path is a dir */
-        file->isblob = 0;
+	file->isblob = 0;
 	file->fctx = NULL;
 	if (avformat_open_input(&file->fctx, url, NULL, NULL) < 0)
 		return STOS_EBADF;
@@ -376,66 +378,66 @@ enum stos_error stos_open(struct ifile *file, const char *url)
 
 static int stos_read_packet(void *opaque, unsigned char *buf, int buf_ssize)
 {
-        struct buffer *data = (struct buffer *) opaque;
-        unsigned int buf_size = (unsigned int) buf_ssize;
-        if (data->size < buf_size)
-                buf_size = (unsigned int) data->size;
+	struct buffer *data = (struct buffer *)opaque;
+	unsigned int buf_size = (unsigned int)buf_ssize;
+	if (data->size < buf_size)
+		buf_size = (unsigned int)data->size;
 
-        if (buf_size == 0)
-                return AVERROR_EOF;
-        memcpy(buf, data->ptr, buf_size);
-        data->ptr += buf_size;
-        data->size -= buf_size;
-        return (int) buf_size;
+	if (buf_size == 0)
+		return AVERROR_EOF;
+	memcpy(buf, data->ptr, buf_size);
+	data->ptr += buf_size;
+	data->size -= buf_size;
+	return (int)buf_size;
 }
 
 enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size)
 {
-        file->isblob = 1;
-        file->fctx = avformat_alloc_context();
-        if (file->fctx == NULL)
-                return STOS_ENOMEM;
+	file->isblob = 1;
+	file->fctx = avformat_alloc_context();
+	if (file->fctx == NULL)
+		return STOS_ENOMEM;
 
-        struct buffer data = {
-                .ptr = buffer,
-                .size = size,
-        };
+	struct buffer data = {
+		.ptr = buffer,
+		.size = size,
+	};
 
-        enum stos_error status = STOS_OK;
+	enum stos_error status = STOS_OK;
 
-        unsigned char *avio_buffer = av_malloc(STOS_AVIO_BUFFER_SIZE);
-        AVIOContext *avio_ctx = NULL;
-        if (avio_buffer == NULL) {
-                status = STOS_ENOMEM;
-                goto error;
-        }
+	unsigned char *avio_buffer = av_malloc(STOS_AVIO_BUFFER_SIZE);
+	AVIOContext *avio_ctx = NULL;
+	if (avio_buffer == NULL) {
+		status = STOS_ENOMEM;
+		goto error;
+	}
 
 	avio_ctx = avio_alloc_context(avio_buffer, STOS_AVIO_BUFFER_SIZE, 0,
 				      &data, &stos_read_packet, NULL, NULL);
 	if (avio_ctx == NULL) {
-                status = STOS_ENOMEM;
-                goto error;
-        }
+		status = STOS_ENOMEM;
+		goto error;
+	}
 
-        file->fctx->pb = avio_ctx;
+	file->fctx->pb = avio_ctx;
 
-        if (avformat_open_input(&file->fctx, NULL, NULL, NULL) < 0) {
-                status = STOS_EINVAL;
-                goto error;
-        }
+	if (avformat_open_input(&file->fctx, NULL, NULL, NULL) < 0) {
+		status = STOS_EINVAL;
+		goto error;
+	}
 
-        if (avformat_find_stream_info(file->fctx, NULL) >= 0)
-                return STOS_OK;
+	if (avformat_find_stream_info(file->fctx, NULL) >= 0)
+		return STOS_OK;
 
-        avformat_close_input(&file->fctx);
-        status = STOS_EINVAL;
+	avformat_close_input(&file->fctx);
+	status = STOS_EINVAL;
 error:
-        if (file->fctx != NULL)
-                avformat_free_context(file->fctx);
-        if (avio_ctx != NULL)
-                av_freep(&avio_ctx->buffer);
-        avio_context_free(&avio_ctx);
-        return status;
+	if (file->fctx != NULL)
+		avformat_free_context(file->fctx);
+	if (avio_ctx != NULL)
+		av_freep(&avio_ctx->buffer);
+	avio_context_free(&avio_ctx);
+	return status;
 }
 
 void stos_close(struct ifile *file)
@@ -450,19 +452,26 @@ void stos_close(struct ifile *file)
 
 /* convert subtitle stream stream_idx to struct subtitle array */
 /* this function will select the first subtitle stream if stream_idx < 0 */
-enum stos_error stos_convert_file(struct subtitle **dst, size_t *num_subs,
-				  int stream_idx, struct ifile *file)
+enum stos_error stos_convert_file(struct subtitle_list *dst, int stream_idx,
+				  struct ifile *file)
 {
 	if (stream_idx < 0)
 		stream_idx = stos_find_istream(file, stos_is_sub);
 
 	struct istream stream;
+	struct subtitle_list list;
 	enum stos_error status = STOS_OK;
 
+	stos_init_sub_list(&list);
 	status = stos_get_istream(&stream, file, stream_idx);
 	if (status == STOS_OK) {
-		status = stos_convert_stream(dst, num_subs, &stream, file);
+		status = stos_process_stream(&stream, file,
+					     stos_process_subtitle, &list);
 		stos_destroy_istream(&stream);
 	}
+	if (dst != NULL)
+		*dst = list;
+	else
+		stos_destroy_sub_list(&list);
 	return status;
 }

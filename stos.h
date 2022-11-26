@@ -82,13 +82,20 @@ struct istream
         const AVCodec *codec;
 };
 
+struct subtitle_list
+{
+	struct subtitle *subs;
+	size_t count;
+	size_t size;
+};
+
 const char *stos_get_error(enum stos_error error);
 void stos_destroy_rect(struct rect *rect);
 void stos_destroy_sub(struct subtitle *sub);
-void stos_destroy_subs(struct subtitle *sub, size_t n);
+void stos_destroy_sub_list(struct subtitle_list *list);
 enum stos_error stos_open(struct ifile *file, const char *url);
 enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size);
 void stos_close(struct ifile *file);
-enum stos_error stos_convert_file(struct subtitle **dst, size_t *num_subs,
-				  int stream_idx, struct ifile *file);
+enum stos_error stos_convert_file(struct subtitle_list *list, int stream_idx,
+				  struct ifile *file);
 #endif

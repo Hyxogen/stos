@@ -68,7 +68,7 @@ testdrivers: $(TSTFILES)
 
 -include $(HEADER_DEPS)
 %.c.mem.out: %.c Makefile
-	$(CC) $(CFLAGS) -fsanitize=memory -o $@ $< $(LFLAGS)
+	$(CC) $(CFLAGS) -fsanitize=memory -fsanitize-memory-track-origins -o $@ $< $(LFLAGS)
 
 -include $(HEADER_DEPS)
 %.c.addr.out: %.c Makefile
