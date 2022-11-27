@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavfilter/avfilter.h>
 
 #ifndef STOS_AVIO_BUFFER_SIZE
 # define STOS_AVIO_BUFFER_SIZE 4096
@@ -31,11 +32,17 @@
 enum stos_error
 {
 	STOS_OK = 0,
+	STOS_EOF,
 	STOS_EINVAL,
 	STOS_ENOMEM,
 	STOS_UNSUP,
         STOS_EIO,
+	STOS_NOSTREAM,
         STOS_EDECODE,
+	STOS_EFILTER,
+	STOS_EENCODE,
+	STOS_ERESCALE,
+	STOS_EOPT,
         STOS_EREAD_FRAME,
         STOS_EBADF,
         STOS_ENOSUB,
@@ -82,6 +89,24 @@ struct istream
         const AVCodec *codec;
 };
 
+struct stream
+{
+        AVStream *stream;
+        AVCodecContext *codec_ctx;
+        const AVCodec *codec;
+	AVFilterGraph *filter_graph;
+	AVFilterContext *filter_ctx;
+	AVFilterInOut *inout;	
+	AVPacket *pkt;
+	AVFrame *frame;
+};
+
+struct file
+{
+	AVFormatContext *fmt;
+	int close_separately;
+};
+
 struct subtitle_list
 {
 	struct subtitle *subs;
@@ -98,4 +123,12 @@ enum stos_error stos_blob(struct ifile *file, const void *buffer, size_t size);
 void stos_close(struct ifile *file);
 enum stos_error stos_convert_file(struct subtitle_list *list, int stream_idx,
 				  struct ifile *file);
+
+/* TEMPORARY */
+void stos_init_file(struct file *file);
+void stos_close_file(struct file *file);
+enum stos_error stos_open_ifile(struct file *file, const char *url);
+enum stos_error stos_open_ofile(struct file *file, const char *path);
+enum stos_error stos_audio_do(struct file *ifile, struct file *ofile);
+
 #endif
