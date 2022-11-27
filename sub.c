@@ -230,7 +230,7 @@ static enum stos_error stos_convert_packet(struct subtitle *dst, AVPacket *pkt,
 
 /* convert a packet from a subtitle stream and add it to the subtitle list */
 static enum stos_error
-stos_process_subtitle(void *opaque, struct istream *stream, AVPacket *packet)
+stos_process_subtitle(void *opaque, struct istream *stream, AVPacket *pkt)
 {
 	struct subtitle_list *list = opaque;
 
@@ -245,13 +245,13 @@ stos_process_subtitle(void *opaque, struct istream *stream, AVPacket *packet)
 	}
 
 	enum stos_error status =
-		stos_convert_packet(&list->subs[list->count], packet, stream);
+		stos_convert_packet(&list->subs[list->count], pkt, stream);
 	list->count += 1;
 	return status;
 }
 
 /* call proc for each packet of istream */
-static enum stos_error stos_process_stream(
+enum stos_error stos_process_stream(
 	struct istream *istream, struct ifile *file,
 	enum stos_error (*proc)(void *, struct istream *stream, AVPacket *),
 	void *opaque)
