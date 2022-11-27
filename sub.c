@@ -344,22 +344,7 @@ void stos_destroy_istream(struct istream *istream)
 
 static int stos_is_sub(const AVStream *stream)
 {
-	enum AVCodecID id = stream->codecpar->codec_id;
-	return id == AV_CODEC_ID_DVD_SUBTITLE ||
-	       id == AV_CODEC_ID_DVB_SUBTITLE || id == AV_CODEC_ID_TEXT ||
-	       id == AV_CODEC_ID_XSUB || id == AV_CODEC_ID_SSA ||
-	       id == AV_CODEC_ID_MOV_TEXT ||
-	       id == AV_CODEC_ID_HDMV_PGS_SUBTITLE ||
-	       id == AV_CODEC_ID_DVB_TELETEXT || id == AV_CODEC_ID_SRT ||
-	       id == AV_CODEC_ID_MICRODVD || id == AV_CODEC_ID_EIA_608 ||
-	       id == AV_CODEC_ID_JACOSUB || id == AV_CODEC_ID_SAMI ||
-	       id == AV_CODEC_ID_REALTEXT || id == AV_CODEC_ID_STL ||
-	       id == AV_CODEC_ID_SUBVIEWER1 || id == AV_CODEC_ID_SUBVIEWER ||
-	       id == AV_CODEC_ID_SUBRIP || id == AV_CODEC_ID_WEBVTT ||
-	       id == AV_CODEC_ID_MPL2 || id == AV_CODEC_ID_VPLAYER ||
-	       id == AV_CODEC_ID_PJS || id == AV_CODEC_ID_ASS ||
-	       id == AV_CODEC_ID_HDMV_TEXT_SUBTITLE || id == AV_CODEC_ID_TTML ||
-	       id == AV_CODEC_ID_ARIB_CAPTION;
+	return stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE;
 }
 
 enum stos_error stos_open(struct ifile *file, const char *url)
