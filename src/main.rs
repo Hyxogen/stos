@@ -1,6 +1,8 @@
 extern crate ffmpeg_next as ffmpeg;
 extern crate pretty_env_logger;
+mod subtitle;
 
+use crate::subtitle::{Subtitle, SubtitleList};
 use clap::Parser;
 use log::{error, info, trace};
 use std::fmt::{Display, Formatter};
@@ -8,8 +10,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use ffmpeg::{
-    codec, codec::packet::packet::Packet, codec::subtitle, decoder, media,
-    util::mathematics::rescale::Rescale, util::rational::Rational,
+    codec, codec::packet::packet::Packet, decoder, media, util::mathematics::rescale::Rescale,
+    util::rational::Rational,
 };
 
 #[derive(Parser, Debug)]
@@ -39,8 +41,8 @@ pub enum SubtitleError {
 fn decode_subtitle(
     decoder: &mut decoder::subtitle::Subtitle,
     packet: &Packet,
-) -> Result<Option<subtitle::Subtitle>, ffmpeg::util::error::Error> {
-    let mut subtitle = subtitle::Subtitle::default();
+) -> Result<Option<codec::subtitle::Subtitle>, ffmpeg::util::error::Error> {
+    let mut subtitle = codec::subtitle::Subtitle::default();
     match decoder.decode(packet, &mut subtitle) {
         Ok(true) => Ok(Some(subtitle)),
         Ok(false) => Ok(None),
@@ -78,58 +80,6 @@ impl Display for Timestamp {
     }
 }
 
-pub struct Subtitle {
-    rects: Vec<Rect>,
-    pub start: i64,
-    pub end: i64,
-}
-
-impl Subtitle {
-    fn rects(&self) -> impl Iterator<Item = &Rect> {
-        self.rects.iter()
-    }
-}
-
-impl From<subtitle::Rect<'_>> for Rect {
-    fn from(rect: subtitle::Rect) -> Self {
-        match rect {
-            subtitle::Rect::Text(text) => Rect::Text(text.get().to_string()),
-            subtitle::Rect::Ass(ass) => Rect::Text(ass.get().to_string()),
-            subtitle::Rect::Bitmap(_) => Rect::Text("".to_string()),
-            _ => todo!(),
-        }
-    }
-}
-
-impl Subtitle {
-    pub fn new(
-        subtitle: &subtitle::Subtitle,
-        packet: &Packet,
-        time_base: Rational,
-    ) -> Result<Self, SubtitleError> {
-        let start = packet
-            .pts()
-            .or(packet.dts())
-            .ok_or(SubtitleError::MissingTimestamp)?
-            + Into::<i64>::into(subtitle.start()).rescale(Rational::new(1, 1000000000), time_base);
-
-        let end = start
-            + packet.duration()
-            + Into::<i64>::into(subtitle.end()).rescale(Rational::new(1, 1000000000), time_base);
-
-        Ok(Self {
-            start: start.try_into().map_err(|_| SubtitleError::NegativeStart)?,
-            end: end.try_into().map_err(|_| SubtitleError::NegativeEnd)?,
-            rects: subtitle.rects().map(From::from).collect(),
-        })
-    }
-}
-
-pub struct SubtitleList {
-    subs: Vec<Subtitle>,
-    pub time_base: Rational,
-}
-
 /*
  *
  *
@@ -152,51 +102,6 @@ pub struct SubtitleList {
  * a:       |---|
  * b: |---|
  */
-
-impl SubtitleList {
-    pub fn new(time_base: Rational) -> Self {
-        Self {
-            subs: Vec::default(),
-            time_base,
-        }
-    }
-
-    pub fn add_sub(&mut self, sub: Subtitle) -> &mut Self {
-        self.subs.push(sub);
-        self
-    }
-
-    pub fn subs(&self) -> impl Iterator<Item = &Subtitle> {
-        self.subs.iter()
-    }
-
-    pub fn coalesce(self) -> Self {
-        let mut subs = Vec::new();
-
-        for subtitle in self.subs {
-            if subs.is_empty() {
-                subs.push(subtitle);
-            } else {
-                let last_idx = subs.len() - 1;
-                let prev_subtitle = &mut subs[last_idx];
-
-                if prev_subtitle.end < subtitle.start || subtitle.start > prev_subtitle.end {
-                    //No overlap
-                    subs.push(subtitle);
-                } else {
-                    prev_subtitle.start = std::cmp::min(prev_subtitle.start, subtitle.start);
-                    prev_subtitle.end = std::cmp::max(prev_subtitle.end, subtitle.end);
-                    prev_subtitle.rects.extend(subtitle.rects);
-                }
-            }
-        }
-
-        Self {
-            subs,
-            time_base: self.time_base,
-        }
-    }
-}
 
 fn generate_command(subs: SubtitleList, audio_idx: Option<usize>) -> Command {
     let mut command = Command::new("ffmpeg");
