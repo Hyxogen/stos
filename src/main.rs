@@ -80,29 +80,6 @@ impl Display for Timestamp {
     }
 }
 
-/*
- *
- *
- * a: |---|
- * b:       |---|
- *
- *
- * a: |---|
- * b:  |---|
- *
- * a: |---|
- * b: |---|
- *
- * a:  |-|
- * b: |---|
- *
- * a:    |---|
- * b: |---|
- *
- * a:       |---|
- * b: |---|
- */
-
 fn generate_command(subs: SubtitleList, audio_idx: Option<usize>) -> Command {
     let mut command = Command::new("ffmpeg");
     let mut idx = 0;
