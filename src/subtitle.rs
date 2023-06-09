@@ -74,18 +74,21 @@ impl Subtitle {
             + packet.duration()
             + Into::<i64>::into(subtitle.end()).rescale(ONE_BILLIONTH, time_base);
 
-        Ok(Self {
-            start: start.try_into().map_err(|_| SubtitleError::NegativeStart)?,
-            end: end.try_into().map_err(|_| SubtitleError::NegativeEnd)?,
-            rects: subtitle.rects().map(From::from).collect(),
-        })
+        if start < 0 {
+            Err(SubtitleError::NegativeStart)
+        } else if end < 0 {
+            Err(SubtitleError::NegativeEnd)
+        } else {
+            Ok(Self {
+                start,
+                end,
+                rects: subtitle.rects().map(From::from).collect(),
+            })
+        }
     }
 
     pub fn overlaps(&self, other: &Self) -> bool {
-        return !(self.end < other.start
-            || other.end < self.start
-            || other.start > self.end
-            || self.start > other.end);
+        !(self.end < other.start || other.end < self.start)
     }
 }
 

@@ -4,7 +4,7 @@ mod subtitle;
 
 use crate::subtitle::{Subtitle, SubtitleList};
 use clap::Parser;
-use log::{error, info, trace, warn};
+use log::{debug, error, trace, warn};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::process::Command;
@@ -44,10 +44,6 @@ fn decode_subtitle(
     }
 }
 
-pub enum Rect {
-    Text(String),
-}
-
 #[derive(Copy, Clone, Debug)]
 pub struct Timestamp {
     ts: i64,
@@ -74,25 +70,61 @@ impl Display for Timestamp {
     }
 }
 
-fn generate_command(subs: SubtitleList, audio_idx: Option<usize>) -> Command {
+fn generate_command(subs: SubtitleList, audio_index: usize) -> Command {
     let mut command = Command::new("ffmpeg");
-    let mut idx = 0;
 
-    for sub in subs.subs() {
+    for (idx, sub) in subs.subs().enumerate() {
         command
             .arg("-ss")
             .arg(Timestamp::new(sub.start, subs.time_base).to_string());
         command
             .arg("-to")
             .arg(Timestamp::new(sub.end, subs.time_base).to_string());
-        command.arg("-map").arg(format!(
-            "0:{}",
-            audio_idx.map(|v| v.to_string()).unwrap_or("a".to_string())
-        ));
+        command.arg("-map").arg(format!("0:{}", audio_index));
         command.arg(format!("out{:03}.mka", idx));
-        idx += 1;
     }
     command
+}
+
+fn medium_to_string(medium: media::Type) -> &'static str {
+    match medium {
+        media::Type::Unknown => "unknown",
+        media::Type::Video => "video",
+        media::Type::Audio => "audio",
+        media::Type::Data => "data",
+        media::Type::Subtitle => "subtitle",
+        media::Type::Attachment => "Attachment",
+    }
+}
+
+fn get_stream(
+    mut streams: ffmpeg::format::context::common::StreamIter,
+    index: Option<usize>,
+    medium: media::Type,
+) -> Result<usize, String> {
+    match index {
+        None => match streams.best(medium) {
+            Some(stream) => {
+                debug!(
+                    "No {} stream was specified, selected stream at index {}",
+                    medium_to_string(medium),
+                    stream.index()
+                );
+                Ok(stream.index())
+            }
+            None => Err(format!("No {} stream found", medium_to_string(medium))),
+        },
+        Some(index) => match streams.nth(index) {
+            Some(stream) if stream.parameters().medium() == medium => Ok(stream.index()),
+            Some(stream) => Err(format!(
+                "Stream at index {} is not a {} stream. Found {} stream",
+                index,
+                medium_to_string(medium),
+                medium_to_string(stream.parameters().medium())
+            )),
+            None => Err(format!("There is no stream at index {}", index)),
+        },
+    }
 }
 
 fn main() {
@@ -103,54 +135,43 @@ fn main() {
     let sub_file = &args.subtitle_input.as_ref().unwrap_or(&args.media_input);
     let mut ictx = ffmpeg::format::input(sub_file).unwrap();
 
-    let input_idx = match args.sub_index {
-        None => {
-            trace!("No subtitle stream index was selected, choosing first available one");
-
-            match ictx.streams().best(media::Type::Subtitle) {
-                Some(stream) => {
-                    info!("Selected subtitle stream at index {}", stream.index());
-                    stream.index()
-                }
-                None => {
-                    error!(
-                        "{}: No subtitle stream found",
-                        sub_file.as_path().as_os_str().to_str().unwrap()
-                    );
-                    std::process::exit(1)
-                }
-            }
+    let input_index = match get_stream(ictx.streams(), args.sub_index, media::Type::Subtitle) {
+        Ok(index) => index,
+        Err(error) => {
+            error!(
+                "{}: {}",
+                sub_file.as_path().as_os_str().to_str().unwrap(),
+                error
+            );
+            std::process::exit(1)
         }
-        Some(sub_idx) => match ictx.streams().nth(sub_idx) {
-            Some(stream) if stream.parameters().medium() == media::Type::Subtitle => stream.index(),
-            Some(_) => {
-                error!("Stream at index {} is not a subtitle stream", sub_idx);
-                std::process::exit(1)
-            }
-            None => {
-                error!(
-                    "{} does not have a stream at index {}",
-                    sub_file.as_path().as_os_str().to_str().unwrap(),
-                    sub_idx
-                );
-                std::process::exit(1)
-            }
-        },
+    };
+
+    let audio_index = match get_stream(ictx.streams(), args.audio_index, media::Type::Audio) {
+        Ok(index) => index,
+        Err(error) => {
+            error!(
+                "{}: {}",
+                sub_file.as_path().as_os_str().to_str().unwrap(),
+                error
+            );
+            std::process::exit(1)
+        }
     };
 
     let context = codec::context::Context::from_parameters(
         ictx.streams()
-            .find(|stream| stream.index() == input_idx)
+            .find(|stream| stream.index() == input_index)
             .unwrap()
             .parameters(),
     )
     .unwrap();
 
     let mut decoder = context.decoder().subtitle().unwrap();
-    let mut subs = SubtitleList::new(ictx.streams().nth(input_idx).unwrap().time_base());
+    let mut subs = SubtitleList::new(ictx.streams().nth(input_index).unwrap().time_base());
 
     for (stream, packet) in ictx.packets() {
-        if stream.index() != input_idx {
+        if stream.index() != input_index {
             continue;
         }
 
@@ -177,7 +198,7 @@ fn main() {
         subs = subs.coalesce();
     }
 
-    let mut command = generate_command(subs, args.audio_index);
+    let mut command = generate_command(subs, audio_index);
     //command.stdout(std::process::Stdio::null());
     //command.stderr(std::process::Stdio::null());
     command.arg("-i").arg(&args.media_input);
