@@ -28,8 +28,15 @@ struct Args {
     #[arg(long)]
     sub_index: Option<usize>,
 
-    #[arg(short, long)]
+    #[arg(short, long, help = "Combines overlapping subtitles into one")]
     coalesce: bool,
+
+    #[arg(
+        short,
+        long = "print",
+        help = "Print the command stos would execute and exit"
+    )]
+    print_command: bool,
 }
 
 fn decode_subtitle(
@@ -209,22 +216,16 @@ fn main() {
     }
 
     let mut command = generate_command(subs, audio_index);
-    //command.stdout(std::process::Stdio::null());
-    //command.stderr(std::process::Stdio::null());
     command.arg("-i").arg(&args.media_input);
     command.arg("-loglevel").arg("warning");
 
-    /*
-    println!("ffmpeg \\");
-    let mut idx = 0;
-    for arg in command.get_args() {
-        print!("{} ", arg.to_str().unwrap());
-        idx = (idx + 1) % 7;
-        if idx == 0 {
-            println!("\\");
+    if args.print_command {
+        print!("ffmpeg ");
+        for arg in command.get_args() {
+            print!("{} ", arg.to_str().unwrap());
         }
-    }*/
-    //println!("{:?}", command.get_args().collect::<Vec<&std::ffi::OsStr>>());
-
-    command.spawn().unwrap().wait().unwrap();
+        println!();
+    } else {
+        command.spawn().unwrap().wait().unwrap();
+    }
 }
