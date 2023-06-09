@@ -3,14 +3,31 @@ extern crate ffmpeg_next as ffmpeg;
 use ffmpeg::codec::{packet, subtitle};
 use ffmpeg::mathematics::rescale::Rescale;
 use ffmpeg::util::rational::Rational;
+use std::fmt;
 
 const ONE_BILLIONTH: Rational = Rational(1, 1000000000);
 
+#[derive(Debug)]
 pub enum SubtitleError {
     NegativeStart,
     NegativeEnd,
     MissingTimestamp,
 }
+
+impl fmt::Display for SubtitleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            SubtitleError::NegativeStart => write!(f, "The subtitle start timestamp is negative"),
+            SubtitleError::NegativeEnd => write!(f, "The subtitle end timestamp is negative"),
+            SubtitleError::MissingTimestamp => write!(
+                f,
+                "The subtitle is missing either the start or end timestamp"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SubtitleError {}
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Rect {

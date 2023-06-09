@@ -4,7 +4,7 @@ mod subtitle;
 
 use crate::subtitle::{Subtitle, SubtitleList};
 use clap::Parser;
-use log::{error, info, trace};
+use log::{error, info, trace, warn};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::process::Command;
@@ -30,12 +30,6 @@ struct Args {
 
     #[arg(short, long)]
     coalesce: bool,
-}
-
-pub enum SubtitleError {
-    NegativeStart,
-    NegativeEnd,
-    MissingTimestamp,
 }
 
 fn decode_subtitle(
@@ -160,9 +154,21 @@ fn main() {
             continue;
         }
 
-        if let Ok(Some(subtitle)) = decode_subtitle(&mut decoder, &packet) {
-            if let Ok(subtitle) = Subtitle::new(&subtitle, &packet, stream.time_base()) {
-                subs.add_sub(subtitle);
+        match decode_subtitle(&mut decoder, &packet) {
+            Ok(Some(subtitle)) => match Subtitle::new(&subtitle, &packet, stream.time_base()) {
+                Ok(subtitle) => {
+                    subs.add_sub(subtitle);
+                }
+                Err(error) => {
+                    warn!("Failed to convert subtitle: {}", error);
+                }
+            },
+            Ok(None) => {
+                trace!("Did not get subtitle this pass");
+            }
+            Err(error) => {
+                error!("Failed to decode subtitle: {}", error);
+                std::process::exit(1);
             }
         }
     }
