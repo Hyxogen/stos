@@ -25,11 +25,15 @@ struct Args {
 
     #[arg(long)]
     sub_index: Option<usize>,
+
+    #[arg(short, long)]
+    coalesce: bool,
 }
 
 pub enum SubtitleError {
     NegativeStart,
     NegativeEnd,
+    MissingTimestamp,
 }
 
 fn decode_subtitle(
@@ -65,7 +69,7 @@ impl Display for Timestamp {
         let ts = self.ts.rescale(self.time_base, Rational::new(1, 1000000));
         write!(
             f,
-            "{}:{}:{}.{}",
+            "{}:{:02}:{}.{}",
             ts / (1000 * 1000 * 60 * 60),
             (ts / (1000 * 1000 * 60)) % 60,
             (ts / (1000 * 1000)) % 60,
@@ -91,19 +95,27 @@ impl From<subtitle::Rect<'_>> for Rect {
         match rect {
             subtitle::Rect::Text(text) => Rect::Text(text.get().to_string()),
             subtitle::Rect::Ass(ass) => Rect::Text(ass.get().to_string()),
+            subtitle::Rect::Bitmap(_) => Rect::Text("".to_string()),
             _ => todo!(),
         }
     }
 }
 
 impl Subtitle {
-    pub fn new(subtitle: &subtitle::Subtitle, packet: &Packet) -> Result<Self, SubtitleError> {
-        let start = match packet.pts() {
-            Some(val) => val,
-            None => subtitle.start().into(),
-        };
+    pub fn new(
+        subtitle: &subtitle::Subtitle,
+        packet: &Packet,
+        time_base: Rational,
+    ) -> Result<Self, SubtitleError> {
+        let start = packet
+            .pts()
+            .or(packet.dts())
+            .ok_or(SubtitleError::MissingTimestamp)?
+            + Into::<i64>::into(subtitle.start()).rescale(Rational::new(1, 1000000000), time_base);
 
-        let end = start + packet.duration();
+        let end = start
+            + packet.duration()
+            + Into::<i64>::into(subtitle.end()).rescale(Rational::new(1, 1000000000), time_base);
 
         Ok(Self {
             start: start.try_into().map_err(|_| SubtitleError::NegativeStart)?,
@@ -117,6 +129,29 @@ pub struct SubtitleList {
     subs: Vec<Subtitle>,
     pub time_base: Rational,
 }
+
+/*
+ *
+ *
+ * a: |---|
+ * b:       |---|
+ *
+ *
+ * a: |---|
+ * b:  |---|
+ *
+ * a: |---|
+ * b: |---|
+ *
+ * a:  |-|
+ * b: |---|
+ *
+ * a:    |---|
+ * b: |---|
+ *
+ * a:       |---|
+ * b: |---|
+ */
 
 impl SubtitleList {
     pub fn new(time_base: Rational) -> Self {
@@ -134,9 +169,36 @@ impl SubtitleList {
     pub fn subs(&self) -> impl Iterator<Item = &Subtitle> {
         self.subs.iter()
     }
+
+    pub fn coalesce(self) -> Self {
+        let mut subs = Vec::new();
+
+        for subtitle in self.subs {
+            if subs.is_empty() {
+                subs.push(subtitle);
+            } else {
+                let last_idx = subs.len() - 1;
+                let prev_subtitle = &mut subs[last_idx];
+
+                if prev_subtitle.end < subtitle.start || subtitle.start > prev_subtitle.end {
+                    //No overlap
+                    subs.push(subtitle);
+                } else {
+                    prev_subtitle.start = std::cmp::min(prev_subtitle.start, subtitle.start);
+                    prev_subtitle.end = std::cmp::max(prev_subtitle.end, subtitle.end);
+                    prev_subtitle.rects.extend(subtitle.rects);
+                }
+            }
+        }
+
+        Self {
+            subs,
+            time_base: self.time_base,
+        }
+    }
 }
 
-fn generate_command(subs: SubtitleList) -> Command {
+fn generate_command(subs: SubtitleList, audio_idx: Option<usize>) -> Command {
     let mut command = Command::new("ffmpeg");
     let mut idx = 0;
 
@@ -147,8 +209,11 @@ fn generate_command(subs: SubtitleList) -> Command {
         command
             .arg("-to")
             .arg(Timestamp::new(sub.end, subs.time_base).to_string());
-        command.arg("-map").arg("0:a");
-        command.arg(format!("out{:03}.aac", idx));
+        command.arg("-map").arg(format!(
+            "0:{}",
+            audio_idx.map(|v| v.to_string()).unwrap_or("a".to_string())
+        ));
+        command.arg(format!("out{:03}.mka", idx));
         idx += 1;
     }
     command
@@ -214,18 +279,33 @@ fn main() {
         }
 
         if let Ok(Some(subtitle)) = decode_subtitle(&mut decoder, &packet) {
-            if let Ok(subtitle) = Subtitle::new(&subtitle, &packet) {
+            if let Ok(subtitle) = Subtitle::new(&subtitle, &packet, stream.time_base()) {
                 subs.add_sub(subtitle);
             }
         }
     }
 
-    let mut command = generate_command(subs);
+    if args.coalesce {
+        subs = subs.coalesce();
+    }
+
+    let mut command = generate_command(subs, args.audio_index);
     //command.stdout(std::process::Stdio::null());
     //command.stderr(std::process::Stdio::null());
     command.arg("-i").arg(&args.media_input);
     command.arg("-loglevel").arg("warning");
 
+    /*
+    println!("ffmpeg \\");
+    let mut idx = 0;
+    for arg in command.get_args() {
+        print!("{} ", arg.to_str().unwrap());
+        idx = (idx + 1) % 7;
+        if idx == 0 {
+            println!("\\");
+        }
+    }*/
+    //println!("{:?}", command.get_args().collect::<Vec<&std::ffi::OsStr>>());
+
     command.spawn().unwrap().wait().unwrap();
-    println!("done");
 }
