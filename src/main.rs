@@ -1,6 +1,8 @@
 extern crate ffmpeg_next as ffmpeg;
+extern crate pretty_env_logger;
 
 use clap::Parser;
+use log::{error, info, trace};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::process::Command;
@@ -12,74 +14,23 @@ use ffmpeg::{
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(short, long)]
-    input: PathBuf,
+    #[arg(short, long = "media")]
+    media_input: PathBuf,
+
+    #[arg(long)]
+    audio_index: Option<usize>,
+
+    #[arg(short, long = "sub")]
+    subtitle_input: Option<PathBuf>,
+
+    #[arg(long)]
+    sub_index: Option<usize>,
 }
 
 pub enum SubtitleError {
     NegativeStart,
     NegativeEnd,
 }
-
-/*
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct AssDialogueEvent {
-    styled: bool,
-    text: String,
-}
-
-pub enum ParseAssError {
-    MissingText,
-    UnbalancedBrackets,
-}
-
-impl FromStr for AssDialogueEvent {
-    type Err = ParseAssError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut text = s.split(',').skip(10).peekable();
-
-        if let Some(_) = text.peek() {
-            let mut styled = false;
-            let mut brackets = 0;
-
-            let text = text.map(|part| {
-                let mut unstyled_text = String::new();
-
-                let mut chars = part.chars().peekable();
-                while let Some(ch) = chars.next() {
-                    if ch == '{' {
-                        styled = true;
-                        brackets += 1;
-                    } else if ch == '}' {
-                        brackets -= 1;
-                    } else if brackets == 0 {
-
-                        if ch == '\\' {
-                            if let Some(next_ch) = chars.peek() {
-                                if *next_ch == 'n' || *next_ch == 'N' {
-                                    unstyled_text.push('\n');
-                                    continue;
-                                }
-                            }
-                        }
-
-                        unstyled_text.push(ch);
-                    }
-                }
-                unstyled_text
-            }).collect();
-
-            Ok(Self {
-                styled,
-                text,
-            })
-        } else {
-            Err(ParseAssError::MissingText)
-        }
-    }
-}
-*/
 
 fn decode_subtitle(
     decoder: &mut decoder::subtitle::Subtitle,
@@ -204,15 +155,47 @@ fn generate_command(subs: SubtitleList) -> Command {
 }
 
 fn main() {
+    pretty_env_logger::init();
     let args = Args::parse();
 
     ffmpeg::init().unwrap();
-    let mut ictx = ffmpeg::format::input(&args.input).unwrap();
-    let input_idx = ictx
-        .streams()
-        .best(media::Type::Subtitle)
-        .expect("No subtitle stream found")
-        .index();
+    let sub_file = &args.subtitle_input.as_ref().unwrap_or(&args.media_input);
+    let mut ictx = ffmpeg::format::input(sub_file).unwrap();
+
+    let input_idx = match args.sub_index {
+        None => {
+            trace!("No subtitle stream index was selected, choosing first available one");
+
+            match ictx.streams().best(media::Type::Subtitle) {
+                Some(stream) => {
+                    info!("Selected subtitle stream at index {}", stream.index());
+                    stream.index()
+                }
+                None => {
+                    error!(
+                        "{}: No subtitle stream found",
+                        sub_file.as_path().as_os_str().to_str().unwrap()
+                    );
+                    std::process::exit(1)
+                }
+            }
+        }
+        Some(sub_idx) => match ictx.streams().nth(sub_idx) {
+            Some(stream) if stream.parameters().medium() == media::Type::Subtitle => stream.index(),
+            Some(_) => {
+                error!("Stream at index {} is not a subtitle stream", sub_idx);
+                std::process::exit(1)
+            }
+            None => {
+                error!(
+                    "{} does not have a stream at index {}",
+                    sub_file.as_path().as_os_str().to_str().unwrap(),
+                    sub_idx
+                );
+                std::process::exit(1)
+            }
+        },
+    };
 
     let context = codec::context::Context::from_parameters(
         ictx.streams()
@@ -238,7 +221,10 @@ fn main() {
     }
 
     let mut command = generate_command(subs);
-    command.arg("-i").arg(&args.input);
+    //command.stdout(std::process::Stdio::null());
+    //command.stderr(std::process::Stdio::null());
+    command.arg("-i").arg(&args.media_input);
+    command.arg("-loglevel").arg("warning");
 
     command.spawn().unwrap().wait().unwrap();
     println!("done");
