@@ -133,9 +133,10 @@ fn main() {
 
     ffmpeg::init().unwrap();
     let sub_file = &args.subtitle_input.as_ref().unwrap_or(&args.media_input);
-    let mut ictx = ffmpeg::format::input(sub_file).unwrap();
+    let mut sub_ictx = ffmpeg::format::input(sub_file).unwrap();
+    let audio_ictx = ffmpeg::format::input(&args.media_input).unwrap();
 
-    let input_index = match get_stream(ictx.streams(), args.sub_index, media::Type::Subtitle) {
+    let input_index = match get_stream(sub_ictx.streams(), args.sub_index, media::Type::Subtitle) {
         Ok(index) => index,
         Err(error) => {
             error!(
@@ -147,12 +148,12 @@ fn main() {
         }
     };
 
-    let audio_index = match get_stream(ictx.streams(), args.audio_index, media::Type::Audio) {
+    let audio_index = match get_stream(audio_ictx.streams(), args.audio_index, media::Type::Audio) {
         Ok(index) => index,
         Err(error) => {
             error!(
                 "{}: {}",
-                sub_file.as_path().as_os_str().to_str().unwrap(),
+                args.media_input.as_path().as_os_str().to_str().unwrap(),
                 error
             );
             std::process::exit(1)
@@ -160,7 +161,8 @@ fn main() {
     };
 
     let context = codec::context::Context::from_parameters(
-        ictx.streams()
+        sub_ictx
+            .streams()
             .find(|stream| stream.index() == input_index)
             .unwrap()
             .parameters(),
@@ -168,9 +170,9 @@ fn main() {
     .unwrap();
 
     let mut decoder = context.decoder().subtitle().unwrap();
-    let mut subs = SubtitleList::new(ictx.streams().nth(input_index).unwrap().time_base());
+    let mut subs = SubtitleList::new(sub_ictx.streams().nth(input_index).unwrap().time_base());
 
-    for (stream, packet) in ictx.packets() {
+    for (stream, packet) in sub_ictx.packets() {
         if stream.index() != input_index {
             continue;
         }
@@ -192,6 +194,14 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    if subs.is_empty() {
+        error!(
+            "{} has no subtitles. The subtitle stream did exist",
+            sub_file.as_path().as_os_str().to_str().unwrap()
+        );
+        std::process::exit(1);
     }
 
     if args.coalesce {

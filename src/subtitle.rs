@@ -12,6 +12,7 @@ pub enum SubtitleError {
     NegativeStart,
     NegativeEnd,
     MissingTimestamp,
+    ZeroLength,
 }
 
 impl fmt::Display for SubtitleError {
@@ -23,6 +24,7 @@ impl fmt::Display for SubtitleError {
                 f,
                 "The subtitle is missing either the start or end timestamp"
             ),
+            SubtitleError::ZeroLength => write!(f, "The subtitle start and end are the same"),
         }
     }
 }
@@ -78,6 +80,8 @@ impl Subtitle {
             Err(SubtitleError::NegativeStart)
         } else if end < 0 {
             Err(SubtitleError::NegativeEnd)
+        } else if start == end {
+            Err(SubtitleError::ZeroLength)
         } else {
             Ok(Self {
                 start,
@@ -112,6 +116,10 @@ impl SubtitleList {
 
     pub fn subs(&self) -> impl Iterator<Item = &Subtitle> {
         self.subs.iter()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.subs.is_empty()
     }
 
     pub fn coalesce(self) -> Self {
