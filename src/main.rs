@@ -32,6 +32,7 @@ pub enum StosError {
     },
     NoSubtitles,
     FFmpegError(std::process::ExitStatus),
+    LabelMe,
 }
 
 impl Display for StosError {
@@ -329,80 +330,6 @@ fn create_command(
     }
 }
 
-fn convert(
-    audio_file: &PathBuf,
-    audio_index: Option<usize>,
-    sub_file: &PathBuf,
-    sub_index: Option<usize>,
-    format: &str,
-    coalesce: bool,
-    file_index: usize,
-) -> Result<()> {
-    let audio_index = get_stream_index(audio_file, audio_index, media::Type::Audio)?;
-    debug!(
-        "Selected audio stream at index {} from {}",
-        audio_index,
-        audio_file.to_string_lossy()
-    );
-
-    let sub_index =
-        get_stream_index(sub_file, sub_index, media::Type::Subtitle).with_context(|| {
-            format!(
-                "{} failed to retrieve subtitle index",
-                sub_file.to_string_lossy()
-            )
-        })?;
-    debug!(
-        "Selected subtitle stream at index {} from {}",
-        sub_index,
-        sub_file.to_string_lossy()
-    );
-
-    let mut subs = get_subtitles(sub_file, sub_index)?;
-    debug!(
-        "{}: Read {} subtitles",
-        sub_file.to_string_lossy(),
-        subs.len()
-    );
-
-    if subs.is_empty() {
-        Err(StosError::NoSubtitles.into())
-    } else {
-        if coalesce {
-            let before = subs.len();
-            subs = subs.coalesce();
-            debug!(
-                "{}: Coalesced {} subtitles into {}",
-                sub_file.to_string_lossy(),
-                before,
-                subs.len()
-            );
-        }
-
-        let mut command = generate_command(subs, audio_index, format, file_index);
-
-        command.arg("-i").arg(audio_file);
-        command.arg("-loglevel").arg("warning");
-
-        debug!(
-            "Starting FFmpeg for audio {} sub {}",
-            audio_file.to_string_lossy(),
-            sub_file.to_string_lossy()
-        );
-
-        let result = command
-            .spawn()
-            .context("could not spawn ffmpeg command")?
-            .wait()
-            .context("an error occurred while waiting for ffmpeg to exit")?;
-        if result.success() {
-            Ok(())
-        } else {
-            Err(StosError::FFmpegError(result).into())
-        }
-    }
-}
-
 fn get_paths(pattern: &str) -> Result<impl Iterator<Item = PathBuf>> {
     Ok(glob(pattern)
         .with_context(|| format!("failed to match glob pattern \"{}\"", pattern))?
@@ -426,12 +353,12 @@ fn main() -> Result<()> {
     trace!("Initalized ffmpeg");
 
     let paths: Vec<PathBuf> = get_paths(&args.file)?.collect();
-    debug!("glob \"{}\" matched {} files", args.file, paths.len());
+    debug!("glob \"{}\" matched {} file(s)", args.file, paths.len());
 
     let sub_paths = if let Some(pattern) = args.sub_file.as_ref() {
         let sub_paths: Vec<PathBuf> = get_paths(pattern)?.collect();
         debug!(
-            "glob \"{}\" matched {} subtitle files",
+            "glob \"{}\" matched {} subtitle file(s)",
             args.file,
             sub_paths.len()
         );
@@ -456,10 +383,11 @@ fn main() -> Result<()> {
         .map(|(idx, (path, sub_path))| (idx, path, sub_path))
         .collect();
 
-    thread::scope(|s| {
+    thread::scope(|s| -> Result<()> {
+        let mut threads = Vec::new();
         for (idx, path, sub_path) in paths.iter() {
-            s.spawn(|| {
-                match create_command(
+            threads.push(s.spawn(|| -> Result<()> {
+                let mut command = create_command(
                     path,
                     args.audio_index,
                     sub_path,
@@ -467,36 +395,45 @@ fn main() -> Result<()> {
                     args.format.as_ref(),
                     args.coalesce,
                     *idx,
-                ) {
-                    Ok(mut command) => {
-                        debug!("generated command for {}", path.to_string_lossy());
+                )?;
+                debug!(
+                    "generated audio extract command for {}",
+                    path.to_string_lossy()
+                );
 
-                        if args.print_command {
-                            println!("{:?}", command);
-                        } else {
-                            match command.status() {
-                                Ok(status) => {
-                                    if status.success() {
-                                        info!("successfully converted a file");
-                                    } else {
-                                        error!(
-                                            "{}: FFmpeg exited with an error",
-                                            path.to_string_lossy()
-                                        );
-                                    }
-                                }
-                                Err(err) => {
-                                    error!("failed to start ffmpeg command: {:?}", err);
-                                }
+                if args.print_command {
+                    println!("{:?}", command);
+                    Ok(())
+                } else {
+                    match command.status() {
+                        Ok(status) => {
+                            if status.success() {
+                                info!(
+                                    "successfully extracted audio from {}",
+                                    path.to_string_lossy()
+                                );
+                            } else {
+                                error!("{}: FFmpeg exited with an error", path.to_string_lossy());
                             }
                         }
+                        Err(err) => {
+                            error!("failed to start ffmpeg command: {:?}", err);
+                        }
                     }
-                    Err(err) => {
-                        error!("failed to generate ffmpeg command: {:?}", err);
-                    }
+                    Ok(())
                 }
-            });
+            }));
         }
-    });
+
+        for thread in threads {
+            match thread.join() {
+                Ok(result) => {
+                    result?;
+                }
+                Err(_) => return Err(StosError::LabelMe.into()),
+            }
+        }
+        Ok(())
+    })?;
     Ok(())
 }

@@ -13,7 +13,6 @@ pub enum SubtitleError {
     NegativeEnd,
     MissingTimestamp,
     ZeroLength,
-    EndBeforeStart { start: i64, end: i64 },
 }
 
 impl fmt::Display for SubtitleError {
@@ -26,11 +25,6 @@ impl fmt::Display for SubtitleError {
                 "The subtitle is missing either the start or end timestamp"
             ),
             SubtitleError::ZeroLength => write!(f, "The subtitle start and end are the same"),
-            SubtitleError::EndBeforeStart { start, end } => write!(
-                f,
-                "The subtitle end ({}) is before the start ({})",
-                end, start
-            ),
         }
     }
 }
