@@ -100,9 +100,18 @@ impl Subtitle {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SubtitleList {
     subs: Vec<Subtitle>,
     pub time_base: Rational,
+}
+
+impl std::ops::Index<usize> for SubtitleList {
+    type Output = Subtitle;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.subs[index]
+    }
 }
 
 impl SubtitleList {

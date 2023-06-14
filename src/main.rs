@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use ffmpeg::{
-    codec, decoder, media, util::mathematics::rescale::Rescale, util::rational::Rational, Stream,
+    codec, decoder, media, util::frame, util::mathematics::rescale::Rescale,
+    util::rational::Rational, Stream,
 };
 use subtitle::*;
 
@@ -46,7 +47,7 @@ struct Cli {
     #[arg(short = 'i', long = "image")]
     gen_image: bool,
 
-    #[arg(long, default_value = "out_%f_%s.bmp")]
+    #[arg(long, default_value = "out_%f_%s.jpg")]
     image_format: String,
 
     #[arg(short, long, default_value = "deck.apkg")]
@@ -417,44 +418,154 @@ fn generate_audio_commands(
     Ok(commands)
 }
 
-/*
-fn generate_command(
-    file_idx: usize,
-    file_count: usize,
-    list: &SubtitleList,
-    audio: Option<(&str, usize)>,
-    image_fmt: Option<&str>,
-) -> Command {
-    let mut command = Command::new("ffmpeg");
+fn convert_frames(
+    decoder: &mut ffmpeg::codec::decoder::video::Video,
+    scaler: &mut ffmpeg::software::scaling::context::Context,
+) -> Result<Vec<image::RgbImage>> {
+    let mut images = Vec::new();
 
-    for (sub_idx, sub) in list.iter().enumerate() {
-        let start = Timestamp::new(sub.start, list.time_base);
+    let mut decoded = frame::video::Video::empty();
+    loop {
+        let res = decoder.receive_frame(&mut decoded);
 
-        command.arg("-ss").arg(start.to_string());
-        let values = FormatValues {
-            file_idx,
-            file_count,
-            sub_idx,
-            sub_count: list.len(),
-        };
+        match res {
+            Ok(_) => {
+                let mut rgb_frame = frame::video::Video::empty();
 
-        if let Some((audio_fmt, stream)) = audio {
-            let end = Timestamp::new(sub.end, list.time_base);
-            command.arg("-to").arg(end.to_string());
-            command.arg("-map").arg(format!("0:{}", stream));
-            command.arg(format_filename(audio_fmt, values));
-        }
+                scaler
+                    .run(&decoded, &mut rgb_frame)
+                    .context("Failed to scale frame")?;
 
-        if let Some(image_fmt) = image_fmt {
-            command.arg("-frames:v").arg("1");
-            command.arg(format_filename(image_fmt, values));
+                let image = image::RgbImage::from_raw(
+                    decoder.width(),
+                    decoder.height(),
+                    rgb_frame.data(0).to_vec(),
+                )
+                .ok_or(Error::msg("Failed to convert frame to image"))?;
+                images.push(image);
+            }
+            Err(err) => {
+                trace!("conv: {}", err);
+                break;
+            }
         }
     }
 
-    command.arg("-loglevel").arg("warning");
+    Ok(images)
+}
 
-    command
-}*/
+fn extract_images(file: &PathBuf, list: &SubtitleList) -> Result<Vec<image::RgbImage>> {
+    let file_str = file.to_string_lossy();
+
+    let mut ictx = ffmpeg::format::input(&file).context("Failed to open file")?;
+    debug!("opened {} for reading images", file_str);
+
+    let stream = ictx
+        .streams()
+        .best(media::Type::Video)
+        .ok_or(Error::msg("No video stream found"))?;
+
+    let stream_index = stream.index();
+    debug!(
+        "{}: selected video stream at index {}",
+        file_str, stream_index
+    );
+
+    let context = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+        .with_context(|| {
+            format!(
+                "Failed to create codec context for {} codec",
+                stream.parameters().id().name()
+            )
+        })?;
+    debug!(
+        "{}: created codec context for {} codec",
+        file_str,
+        stream.parameters().id().name()
+    );
+
+    let mut decoder = context.decoder().video().with_context(|| {
+        format!(
+            "Failed to open decoder for {} codec",
+            stream.parameters().id().name()
+        )
+    })?;
+
+    decoder.skip_frame(ffmpeg::codec::discard::Discard::NonKey);
+
+    let mut scaler = ffmpeg::software::scaling::context::Context::get(
+        decoder.format(),
+        decoder.width(),
+        decoder.height(),
+        ffmpeg::format::Pixel::RGB24,
+        decoder.width(),
+        decoder.height(),
+        ffmpeg::software::scaling::flag::Flags::BILINEAR,
+    )
+    .with_context(|| format!("{}: Failed to create scaler", file_str))?;
+    trace!("created scaler");
+
+    let mut sub_idx = 0;
+
+    let mut images = Vec::new();
+
+    let mut receive_and_process_frame = |decoder: &mut ffmpeg::decoder::Video| -> Result<()> {
+        let mut decoded = frame::video::Video::empty();
+        while decoder.receive_frame(&mut decoded).is_ok() {
+            if sub_idx >= list.len() {
+                break;
+            }
+
+            if decoded.pts().unwrap_or(0) < list[sub_idx].start {
+                continue;
+            }
+
+            let mut rgb_frame = frame::video::Video::empty();
+
+            scaler
+                .run(&decoded, &mut rgb_frame)
+                .with_context(|| format!("{}: Failed to scale frame", file_str))?;
+
+            let image = image::RgbImage::from_raw(
+                decoder.width(),
+                decoder.height(),
+                rgb_frame.data(0).to_vec(),
+            );
+
+            images.push(image.ok_or(Error::msg("Failed to convert frame to image"))?);
+
+            sub_idx += 1;
+            trace!("{}/{}", sub_idx, list.len());
+        }
+        Ok(())
+    };
+
+    for (stream, packet) in ictx.packets() {
+        if stream.index() == stream_index {
+            decoder
+                .send_packet(&packet)
+                .context("Failed to send packet to decoder")?;
+
+            receive_and_process_frame(&mut decoder)?;
+        }
+    }
+
+    decoder
+        .send_eof()
+        .context("Failed to send EOF to the decoder")?;
+    receive_and_process_frame(&mut decoder)?;
+
+    if images.len() < list.len() {
+        warn!(
+            "the video stream is shorter than the subtitle stream, only extracted {} images",
+            images.len()
+        );
+    }
+
+    debug!("converted {} frames to images", images.len());
+
+    Ok(images)
+}
 
 fn generate_package(
     deck_id: i64,
@@ -543,6 +654,11 @@ fn main() -> Result<()> {
 
     let mut commands = Vec::new();
 
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(12)
+        .build()
+        .unwrap();
+
     if args.gen_audio || args.gen_image {
         let media_files: Vec<PathBuf> =
             match_files(args.media_pattern.as_ref().unwrap_or(&args.sub_pattern))?.collect();
@@ -570,13 +686,48 @@ fn main() -> Result<()> {
             commands.extend(audio_commands);
         }
 
+        let subs2 = subs.clone();
+        let subs2_len = subs2.len();
+
         if args.gen_image {
-            let image_commands = generate_image_commands(&subs, &media_files, &args.image_format);
-            debug!(
-                "generated {} command(s) to extract images",
-                image_commands.len()
-            );
-            commands.extend(image_commands);
+            pool.scope(|s| {
+                let image_format2 = args.image_format.as_str();
+                for (file_idx, (list, media_file)) in
+                    subs2.into_iter().zip(media_files.iter()).enumerate()
+                {
+                    s.spawn(move |_| {
+                        let images = extract_images(media_file, &list).with_context(|| {
+                            format!("{}: Failed to extract images", media_file.to_string_lossy())
+                        });
+
+                        match images {
+                            Ok(images) => {
+                                for (sub_idx, (_, image)) in list.iter().zip(images).enumerate() {
+                                    let values = FormatValues {
+                                        file_idx,
+                                        file_count: subs2_len,
+                                        sub_idx,
+                                        sub_count: list.len(),
+                                    };
+
+                                    match image.save(format_filename(image_format2, values)) {
+                                        Ok(_) => {
+                                            trace!("wrote an image");
+                                        }
+                                        Err(err) => {
+                                            error!("failed to save image: {}", err);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                error!("{}", err);
+                            }
+                        }
+                        debug!("extracted images!");
+                    });
+                }
+            });
         }
     }
 
@@ -592,11 +743,6 @@ fn main() -> Result<()> {
     }
 
     if !args.no_media {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .build()
-            .unwrap();
-
         pool.scope(|s| {
             for mut command in commands {
                 s.spawn(move |_| match command.status() {
@@ -613,7 +759,6 @@ fn main() -> Result<()> {
                 });
             }
         });
-        debug!("done?");
     } else {
         debug!("did not execute ffmpeg commands because \"--no-media\" was specified");
     }
