@@ -94,6 +94,10 @@ impl Subtitle {
     pub fn overlaps(&self, other: &Self) -> bool {
         !(self.end < other.start || other.end < self.start)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Rect> {
+        self.rects.iter()
+    }
 }
 
 pub struct SubtitleList {
@@ -114,7 +118,7 @@ impl SubtitleList {
         self
     }
 
-    pub fn subs(&self) -> impl Iterator<Item = &Subtitle> {
+    pub fn iter(&self) -> impl Iterator<Item = &Subtitle> {
         self.subs.iter()
     }
 

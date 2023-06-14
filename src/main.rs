@@ -1,107 +1,71 @@
 extern crate ffmpeg_next as ffmpeg;
-extern crate pretty_env_logger;
+
 mod subtitle;
 
-use crate::subtitle::{Subtitle, SubtitleList};
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use clap::Parser;
+use genanki_rs::{Deck, Field, Model, Note, Package, Template};
 use glob::glob;
 use log::{debug, error, info, trace, warn};
-use std::fmt::{Display, Formatter};
+use rand::random;
+use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
-use std::thread;
 
 use ffmpeg::{
-    codec, codec::packet::packet::Packet, decoder, media, util::mathematics::rescale::Rescale,
-    util::rational::Rational,
+    codec, decoder, media, util::mathematics::rescale::Rescale, util::rational::Rational, Stream,
 };
-
-#[derive(Debug)]
-pub enum StosError {
-    StreamSelectError(String),
-    OpenDecoderError(ffmpeg::util::error::Error),
-    NoStreamFound(media::Type),
-    IncorrectStreamType {
-        found: media::Type,
-        expected: media::Type,
-    },
-    StreamOutOfBounds {
-        index: usize,
-        max: usize,
-    },
-    NoSubtitles,
-    FFmpegError(std::process::ExitStatus),
-    LabelMe,
-}
-
-impl Display for StosError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            StosError::StreamSelectError(err) => write!(f, "Could not select stream: {}", err),
-            StosError::NoStreamFound(medium) => {
-                write!(f, "No {} stream present in file", medium_to_string(*medium))
-            }
-            StosError::IncorrectStreamType { found, expected } => write!(
-                f,
-                "Stream is of invalid type. Expected: {} found: {}",
-                medium_to_string(*expected),
-                medium_to_string(*found)
-            ),
-            StosError::StreamOutOfBounds { index, max } => {
-                write!(f, "Stream index {} out of bounds (max {})", index, max)
-            }
-            StosError::NoSubtitles => write!(f, "The stream did not contain any subtitles"),
-            StosError::FFmpegError(exit_status) => match exit_status.code() {
-                Some(code) => write!(f, "FFmpeg did not exit successfully, exit code: {}", code),
-                None => write!(f, "FFmpeg was killed by a signal"),
-            },
-            _ => todo!(),
-        }
-    }
-}
-
-impl std::error::Error for StosError {}
+use subtitle::*;
 
 #[derive(Parser, Debug)]
 struct Cli {
-    file: String,
-
-    sub_file: Option<String>,
+    sub_pattern: String,
+    media_pattern: Option<String>,
 
     #[clap(flatten)]
     verbose: clap_verbosity_flag::Verbosity,
 
-    #[arg(short, long)]
-    audio_index: Option<usize>,
+    #[arg(long)]
+    no_media: bool,
+
+    #[arg(long)]
+    no_deck: bool,
 
     #[arg(short, long)]
-    sub_index: Option<usize>,
+    sub_stream: Option<usize>,
 
-    #[arg(short, long, default_value = "out_%f_%s.mka")]
-    format: String,
+    #[arg(short = 'a', long = "audio")]
+    gen_audio: bool,
 
-    #[arg(short, long, help = "Combines overlapping subtitles into one")]
+    #[arg(long)]
+    audio_stream: Option<usize>,
+
+    #[arg(long, default_value = "out_%f_%s.mka")]
+    audio_format: String,
+
+    #[arg(short = 'i', long = "image")]
+    gen_image: bool,
+
+    #[arg(long, default_value = "out_%f_%s.bmp")]
+    image_format: String,
+
+    #[arg(short, long, default_value = "deck.apkg")]
+    output: String,
+
+    #[arg(long = "id")]
+    deck_id: Option<i64>,
+
+    #[arg(short, long, default_value = "stos deck")]
+    deck_name: String,
+
+    #[arg(long, default_value = "")]
+    deck_desc: String,
+
+    #[arg(short, long)]
     coalesce: bool,
 
-    #[arg(
-        short,
-        long = "print",
-        help = "Print the command stos would execute and exit"
-    )]
+    #[arg(short, long = "print")]
     print_command: bool,
-}
-
-fn decode_subtitle(
-    decoder: &mut decoder::subtitle::Subtitle,
-    packet: &Packet,
-) -> Result<Option<codec::subtitle::Subtitle>, ffmpeg::util::error::Error> {
-    let mut subtitle = codec::subtitle::Subtitle::default();
-    match decoder.decode(packet, &mut subtitle) {
-        Ok(true) => Ok(Some(subtitle)),
-        Ok(false) => Ok(None),
-        Err(err) => Err(err),
-    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -129,8 +93,8 @@ impl Timestamp {
     }
 }
 
-impl Display for Timestamp {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ts = self.ts.rescale(self.time_base, Rational::new(1, 1000000));
         write!(
             f,
@@ -143,203 +107,396 @@ impl Display for Timestamp {
     }
 }
 
-fn generate_command(
-    subs: SubtitleList,
-    audio_index: usize,
-    format: &str,
-    file_index: usize,
-) -> Command {
-    let mut command = Command::new("ffmpeg");
-
-    for (idx, sub) in subs.subs().enumerate() {
-        let start = Timestamp::new(sub.start, subs.time_base);
-        let end = Timestamp::new(sub.end, subs.time_base);
-
-        command.arg("-ss").arg(start.to_string());
-        command.arg("-to").arg(end.to_string());
-        command.arg("-map").arg(format!("0:{}", audio_index));
-        command.arg(
-            format
-                .replace("%f", format!("{:02}", file_index).as_ref())
-                .replace("%s", format!("{:03}", idx).as_ref()),
-        );
-        //command.arg(format!("out{:03}.mka", idx));
-    }
-    command
+trait Name {
+    fn name(&self) -> &'static str;
 }
 
-fn medium_to_string(medium: media::Type) -> &'static str {
-    match medium {
-        media::Type::Unknown => "unknown",
-        media::Type::Video => "video",
-        media::Type::Audio => "audio",
-        media::Type::Data => "data",
-        media::Type::Subtitle => "subtitle",
-        media::Type::Attachment => "attachment",
-    }
-}
-
-fn get_stream_index(file: &PathBuf, index: Option<usize>, medium: media::Type) -> Result<usize> {
-    let ictx = ffmpeg::format::input(file)
-        .with_context(|| format!("failed to open {}", file.to_string_lossy(),))?;
-
-    let mut streams = ictx.streams();
-
-    match index {
-        None => Ok(streams
-            .best(medium)
-            .ok_or(StosError::NoStreamFound(medium))?
-            .index()),
-        Some(index) => {
-            let stream = streams.nth(index).ok_or(StosError::StreamOutOfBounds {
-                index,
-                max: ictx.streams().count(),
-            })?;
-
-            if stream.parameters().medium() == medium {
-                Ok(index)
-            } else {
-                Err(StosError::IncorrectStreamType {
-                    found: stream.parameters().medium(),
-                    expected: medium,
-                }
-                .into())
-            }
+impl Name for media::Type {
+    fn name(&self) -> &'static str {
+        match self {
+            media::Type::Unknown => "unknown",
+            media::Type::Video => "video",
+            media::Type::Audio => "audio",
+            media::Type::Data => "data",
+            media::Type::Subtitle => "subtitle",
+            media::Type::Attachment => "attachment",
         }
     }
 }
 
-//Gets all the subtitles from sub_file at stream index sub_index. Panics if stream index is a
-//invalid stream index
-fn get_subtitles(sub_file: &PathBuf, sub_index: usize) -> Result<SubtitleList> {
-    let mut sub_ictx = ffmpeg::format::input(sub_file)
-        .with_context(|| format!("failed to open {}", sub_file.to_string_lossy()))?;
+fn get_stream<'a>(
+    mut streams: impl Iterator<Item = Stream<'a>>,
+    medium: media::Type,
+    stream: Option<usize>,
+) -> Result<usize> {
+    match stream {
+        Some(index) => {
+            let stream = streams.nth(index).ok_or_else(|| {
+                Error::msg(format!("The file does not contain {} stream(s)", index))
+            })?;
 
-    let (context, time_base) = {
-        let stream = sub_ictx.streams().nth(sub_index).unwrap();
+            let stream_medium = stream.parameters().medium();
+
+            if stream_medium == medium {
+                Ok(index)
+            } else {
+                Err(Error::msg(format!(
+                    "Incorrect stream type. Found {}, expected {}",
+                    stream_medium.name(),
+                    medium.name()
+                )))
+            }
+        }
+        None => Ok(streams
+            .find(|stream| stream.parameters().medium() == medium)
+            .ok_or_else(|| {
+                Error::msg(format!(
+                    "The file does not contain a {} stream",
+                    medium.name()
+                ))
+            })?
+            .index()),
+    }
+}
+
+fn decode_subtitle(
+    decoder: &mut decoder::subtitle::Subtitle,
+    packet: &codec::packet::packet::Packet,
+) -> Result<Option<codec::subtitle::Subtitle>> {
+    let mut subtitle = Default::default();
+    if decoder.decode(packet, &mut subtitle)? {
+        Ok(Some(subtitle))
+    } else {
+        Ok(None)
+    }
+}
+
+fn read_subtitles(
+    mut ictx: ffmpeg::format::context::Input,
+    stream_idx: usize,
+) -> Result<SubtitleList> {
+    let (context, time_base, codec) = {
+        let stream = ictx.streams().nth(stream_idx).unwrap();
+        let codec = stream.parameters().id();
         (
-            codec::context::Context::from_parameters(stream.parameters()).with_context(|| {
-                format!(
-                    "failed to create codec context for codec type {}",
-                    stream.parameters().id().name()
-                )
-            })?,
+            codec::context::Context::from_parameters(stream.parameters())
+                .with_context(|| format!("Failed to create codec context for {}", codec.name()))?,
             stream.time_base(),
+            codec,
         )
     };
+    debug!("created {} codec context for subtitle stream", codec.name());
 
-    let mut decoder = context.decoder().subtitle().with_context(|| {
-        format!(
-            "failed to open decoder for codec type {}",
-            sub_ictx
-                .streams()
-                .nth(sub_index)
-                .unwrap()
-                .parameters()
-                .id()
-                .name()
-        )
-    })?;
-
-    trace!(
-        "{}: Using codec {}",
-        sub_file.to_string_lossy(),
-        decoder.id().name()
-    );
+    let mut decoder = context
+        .decoder()
+        .subtitle()
+        .with_context(|| format!("Failed to open decoder for codec {}", codec.name()))?;
+    debug!("opened decoder for {} codec", codec.name());
 
     let mut subs = SubtitleList::new(time_base);
+    trace!("created subtitle list");
 
-    for (stream, packet) in sub_ictx.packets() {
-        if stream.index() != sub_index {
+    for (stream, packet) in ictx.packets() {
+        if stream.index() != stream_idx {
             continue;
         }
 
-        match decode_subtitle(&mut decoder, &packet).context("failed to decode subtitle packet")? {
-            Some(subtitle) => match Subtitle::new(&subtitle, &packet, time_base) {
+        if let Some(subtitle) =
+            decode_subtitle(&mut decoder, &packet).context("Failed to decode subtitle packet")?
+        {
+            match Subtitle::new(&subtitle, &packet, time_base) {
                 Ok(subtitle) => {
-                    trace!("Added a subtitle");
                     subs.add_sub(subtitle);
                 }
                 Err(err) => {
                     warn!("Failed to convert a subtitle: {}", err);
                 }
-            },
-            None => {
-                trace!("Did not get a subtitle this pass");
             }
         }
     }
+    debug!("read {} subtitles", subs.len());
+
     Ok(subs)
 }
 
-fn create_command(
-    audio_file: &PathBuf,
-    audio_index: Option<usize>,
-    sub_file: &PathBuf,
-    sub_index: Option<usize>,
-    format: &str,
-    coalesce: bool,
-    file_index: usize,
-) -> Result<std::process::Command> {
-    let audio_index = get_stream_index(audio_file, audio_index, media::Type::Audio)?;
+fn get_subtitles(file: &PathBuf, stream: Option<usize>) -> Result<SubtitleList> {
+    let file_str = file.to_string_lossy();
+
+    let ictx =
+        ffmpeg::format::input(file).with_context(|| format!("Failed to open {}", file_str))?;
+    debug!("opened {} for reading subtitles", file_str);
+
+    let stream_idx = get_stream(ictx.streams(), media::Type::Subtitle, stream)
+        .with_context(|| format!("Failed to retrieve subtitle stream from {}", file_str))?;
     debug!(
-        "Selected audio stream at index {} from {}",
-        audio_index,
-        audio_file.to_string_lossy()
+        "{}: Using subtitle stream at index {}",
+        file_str, stream_idx
     );
 
-    let sub_index =
-        get_stream_index(sub_file, sub_index, media::Type::Subtitle).with_context(|| {
-            format!(
-                "{} failed to retrieve subtitle index",
-                sub_file.to_string_lossy()
-            )
-        })?;
-    debug!(
-        "Selected subtitle stream at index {} from {}",
-        sub_index,
-        sub_file.to_string_lossy()
-    );
-
-    let mut subs = get_subtitles(sub_file, sub_index)?;
-    debug!(
-        "{}: Read {} subtitles",
-        sub_file.to_string_lossy(),
-        subs.len()
-    );
-
-    if subs.is_empty() {
-        Err(StosError::NoSubtitles.into())
-    } else {
-        if coalesce {
-            let before = subs.len();
-            subs = subs.coalesce();
-            debug!(
-                "{}: Coalesced {} subtitles into {}",
-                sub_file.to_string_lossy(),
-                before,
-                subs.len()
-            );
-        }
-
-        let mut command = generate_command(subs, audio_index, format, file_index);
-
-        command.arg("-i").arg(audio_file);
-        command.arg("-loglevel").arg("warning");
-        Ok(command)
-    }
+    trace!("{}: Reading subtitles...", file_str);
+    read_subtitles(ictx, stream_idx)
+        .with_context(|| format!("{}: Failed to read subtitles", file_str))
 }
 
-fn get_paths(pattern: &str) -> Result<impl Iterator<Item = PathBuf>> {
+fn match_files(pattern: &str) -> Result<impl Iterator<Item = PathBuf>> {
     Ok(glob(pattern)
-        .with_context(|| format!("failed to match glob pattern \"{}\"", pattern))?
+        .with_context(|| format!("Failed to match glob pattern \"{}\"", pattern))?
         .filter_map(|entry| match entry {
             Ok(entry) => Some(entry),
             Err(err) => {
-                debug!("skipping a file: {}", err);
+                warn!("Could not access file: {}", err);
                 None
             }
         }))
+}
+
+fn create_note(
+    model: &Model,
+    index: usize,
+    rect: &Rect,
+    image_file: Option<&str>,
+    audio_file: Option<&str>,
+) -> Result<Note> {
+    let audio_file = audio_file
+        .map(|file| format!("[sound:{}]", file))
+        .unwrap_or("".to_string());
+
+    let image_file = image_file
+        .map(|file| format!("<img src=\"{}\">", file))
+        .unwrap_or("".to_string());
+
+    match rect {
+        Rect::Text(dialogue) => Ok(Note::new(
+            model.clone(),
+            vec![&index.to_string(), &image_file, &audio_file, dialogue],
+        )
+        .context("Failed to create Note")?),
+    }
+}
+
+fn create_notes(
+    subs: &Vec<SubtitleList>,
+    image_fmt: Option<&str>,
+    audio_fmt: Option<&str>,
+) -> Result<Vec<Note>> {
+    let model = Model::new(
+        8815489913192057415,
+        "Stos Model",
+        vec![
+            Field::new("Sequence indicator"),
+            Field::new("Image"),
+            Field::new("Audio"),
+            Field::new("Text"),
+        ],
+        vec![Template::new("Card 1")
+            .qfmt("{{Text}}")
+            .afmt("{{FrontSide}}{{Image}}{{Audio}}{{Text}}")],
+    );
+
+    let mut notes = Vec::new();
+    let mut idx = 0;
+
+    for (file_idx, list) in subs.iter().enumerate() {
+        for (sub_idx, sub) in list.iter().enumerate() {
+            let values = FormatValues {
+                file_idx,
+                file_count: subs.len(),
+                sub_idx,
+                sub_count: list.len(),
+            };
+            for (_rect_idx, rect) in sub.iter().enumerate() {
+                notes.push(create_note(
+                    &model,
+                    idx,
+                    rect,
+                    image_fmt.map(|fmt| format_filename(fmt, values)).as_deref(),
+                    audio_fmt.map(|fmt| format_filename(fmt, values)).as_deref(),
+                )?);
+                idx += 1;
+            }
+        }
+    }
+    Ok(notes)
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct FormatValues {
+    file_idx: usize,
+    file_count: usize,
+    sub_idx: usize,
+    sub_count: usize,
+}
+
+fn format_filename(format: &str, values: FormatValues) -> String {
+    let file_width: usize = values
+        .file_count
+        .checked_ilog10()
+        .unwrap_or(1)
+        .try_into()
+        .unwrap_or(0usize)
+        + 1;
+    let sub_width: usize = values
+        .sub_count
+        .checked_ilog10()
+        .unwrap_or(1)
+        .try_into()
+        .unwrap_or(0usize)
+        + 1;
+    format
+        .replace("%f", &format!("{:0file_width$}", values.file_idx))
+        .replace("%s", &format!("{:0sub_width$}", values.sub_idx))
+}
+
+fn generate_image_commands(
+    subs: &Vec<SubtitleList>,
+    media_files: &Vec<PathBuf>,
+    image_fmt: &str,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+
+    for (file_idx, (list, media_file)) in subs.iter().zip(media_files.iter()).enumerate() {
+        for (sub_idx, sub) in list.iter().enumerate() {
+            let values = FormatValues {
+                file_idx,
+                file_count: subs.len(),
+                sub_idx,
+                sub_count: list.len(),
+            };
+
+            let start = Timestamp::new(sub.start, list.time_base);
+            let mut command = Command::new("ffmpeg");
+
+            command.arg("-ss").arg(start.to_string());
+            command.arg("-frames:v").arg("1");
+            command.arg(format_filename(image_fmt, values));
+            command.arg("-loglevel").arg("warning");
+            command.arg("-i").arg(media_file);
+            commands.push(command);
+        }
+    }
+    commands
+}
+
+fn generate_audio_commands(
+    subs: &Vec<SubtitleList>,
+    audio_files: &Vec<PathBuf>,
+    audio_stream: Option<usize>,
+    audio_fmt: &str,
+) -> Result<Vec<Command>> {
+    let mut commands = Vec::new();
+
+    for (file_idx, (list, audio_file)) in subs.iter().zip(audio_files.iter()).enumerate() {
+        let stream_index = {
+            let ictx = ffmpeg::format::input(audio_file)
+                .with_context(|| format!("Failed to open {}", audio_file.to_string_lossy()))?;
+
+            get_stream(ictx.streams(), media::Type::Audio, audio_stream)?
+        };
+
+        let mut command = Command::new("ffmpeg");
+        for (sub_idx, sub) in list.iter().enumerate() {
+            let values = FormatValues {
+                file_idx,
+                file_count: subs.len(),
+                sub_idx,
+                sub_count: list.len(),
+            };
+
+            let start = Timestamp::new(sub.start, list.time_base);
+            let end = Timestamp::new(sub.end, list.time_base);
+
+            command.arg("-ss").arg(start.to_string());
+            command.arg("-to").arg(end.to_string());
+            command.arg("-map").arg(format!("0:{}", stream_index));
+            command.arg(format_filename(audio_fmt, values));
+        }
+        command.arg("-loglevel").arg("warning");
+        command.arg("-i").arg(audio_file);
+        commands.push(command);
+    }
+    Ok(commands)
+}
+
+/*
+fn generate_command(
+    file_idx: usize,
+    file_count: usize,
+    list: &SubtitleList,
+    audio: Option<(&str, usize)>,
+    image_fmt: Option<&str>,
+) -> Command {
+    let mut command = Command::new("ffmpeg");
+
+    for (sub_idx, sub) in list.iter().enumerate() {
+        let start = Timestamp::new(sub.start, list.time_base);
+
+        command.arg("-ss").arg(start.to_string());
+        let values = FormatValues {
+            file_idx,
+            file_count,
+            sub_idx,
+            sub_count: list.len(),
+        };
+
+        if let Some((audio_fmt, stream)) = audio {
+            let end = Timestamp::new(sub.end, list.time_base);
+            command.arg("-to").arg(end.to_string());
+            command.arg("-map").arg(format!("0:{}", stream));
+            command.arg(format_filename(audio_fmt, values));
+        }
+
+        if let Some(image_fmt) = image_fmt {
+            command.arg("-frames:v").arg("1");
+            command.arg(format_filename(image_fmt, values));
+        }
+    }
+
+    command.arg("-loglevel").arg("warning");
+
+    command
+}*/
+
+fn generate_package(
+    deck_id: i64,
+    deck_name: &str,
+    deck_desc: &str,
+    subs: &Vec<SubtitleList>,
+    audio_fmt: Option<&str>,
+    image_fmt: Option<&str>,
+) -> Result<Package> {
+    let notes = create_notes(subs, audio_fmt, image_fmt)?;
+    trace!("created notes");
+
+    let mut deck = Deck::new(deck_id, deck_name, deck_desc);
+    for note in notes {
+        deck.add_note(note);
+    }
+
+    let mut media = Vec::new();
+
+    for (file_idx, list) in subs.iter().enumerate() {
+        for (sub_idx, _) in list.iter().enumerate() {
+            let values = FormatValues {
+                file_idx,
+                file_count: subs.len(),
+                sub_idx,
+                sub_count: list.len(),
+            };
+            if let Some(audio_fmt) = audio_fmt {
+                media.push(format_filename(audio_fmt, values));
+            }
+
+            if let Some(image_fmt) = image_fmt {
+                media.push(format_filename(image_fmt, values));
+            }
+        }
+    }
+    trace!("generated media references");
+
+    Ok(Package::new(
+        vec![deck],
+        media.iter().map(|x| x.as_str()).collect(),
+    )?)
 }
 
 fn main() -> Result<()> {
@@ -348,92 +505,148 @@ fn main() -> Result<()> {
     pretty_env_logger::formatted_builder()
         .filter_level(args.verbose.log_level_filter())
         .init();
+    trace!("initialized logger");
 
-    ffmpeg::init().context("Failed to initalize FFmpeg")?;
-    trace!("Initalized ffmpeg");
+    ffmpeg::init().context("Failed to initialize libav")?;
+    trace!("initialized libav");
 
-    let paths: Vec<PathBuf> = get_paths(&args.file)?.collect();
-    debug!("glob \"{}\" matched {} file(s)", args.file, paths.len());
+    let sub_files: Vec<PathBuf> = match_files(&args.sub_pattern)?.collect();
+    debug!(
+        "{} matched {} subtitle file(s)",
+        args.sub_pattern,
+        sub_files.len()
+    );
 
-    let sub_paths = if let Some(pattern) = args.sub_file.as_ref() {
-        let sub_paths: Vec<PathBuf> = get_paths(pattern)?.collect();
+    let subs = sub_files
+        .iter()
+        .map(|file| {
+            get_subtitles(file, args.sub_stream).map(|list| {
+                if args.coalesce {
+                    let before = list.len();
+                    let new_list = list.coalesce();
+                    debug!(
+                        "{}: coalesced {} subtitles into {}",
+                        file.to_string_lossy(),
+                        before,
+                        new_list.len()
+                    );
+                    new_list
+                } else {
+                    list
+                }
+            })
+        })
+        .collect::<Result<Vec<SubtitleList>>>()?;
+
+    let deck_id = args.deck_id.unwrap_or(random());
+    debug!("using deck id {}", deck_id);
+
+    let mut commands = Vec::new();
+
+    if args.gen_audio || args.gen_image {
+        let media_files: Vec<PathBuf> =
+            match_files(args.media_pattern.as_ref().unwrap_or(&args.sub_pattern))?.collect();
         debug!(
-            "glob \"{}\" matched {} subtitle file(s)",
-            args.file,
-            sub_paths.len()
+            "{} matched {} media files",
+            args.sub_pattern,
+            media_files.len()
         );
-        sub_paths
-    } else {
-        debug!(
-            "no pattern specified for subtitle files, will use \"{}\"",
-            args.file
-        );
-        paths.clone()
-    };
 
-    if paths.is_empty() {
-        error!("no paths to convert");
+        if media_files.len() != sub_files.len() {
+            warn!("amount of subtitle ({}) does not match the amount of audio media ({}), will only convert {} files", sub_files.len(), media_files.len(), media_files.len().min(sub_files.len()));
+        }
+
+        if args.gen_audio {
+            let audio_commands = generate_audio_commands(
+                &subs,
+                &media_files,
+                args.audio_stream,
+                &args.audio_format,
+            )?;
+            debug!(
+                "generated {} command(s) to extract audio",
+                audio_commands.len()
+            );
+            commands.extend(audio_commands);
+        }
+
+        if args.gen_image {
+            let image_commands = generate_image_commands(&subs, &media_files, &args.image_format);
+            debug!(
+                "generated {} command(s) to extract images",
+                image_commands.len()
+            );
+            commands.extend(image_commands);
+        }
+    }
+
+    if args.print_command {
+        for command in commands {
+            println!("{:?}", command);
+        }
         std::process::exit(1);
     }
 
-    let paths: Vec<(usize, PathBuf, PathBuf)> = paths
-        .into_iter()
-        .zip(sub_paths)
-        .enumerate()
-        .map(|(idx, (path, sub_path))| (idx, path, sub_path))
-        .collect();
+    if args.print_command {
+        std::process::exit(0);
+    }
 
-    thread::scope(|s| -> Result<()> {
-        let mut threads = Vec::new();
-        for (idx, path, sub_path) in paths.iter() {
-            threads.push(s.spawn(|| -> Result<()> {
-                let mut command = create_command(
-                    path,
-                    args.audio_index,
-                    sub_path,
-                    args.sub_index,
-                    args.format.as_ref(),
-                    args.coalesce,
-                    *idx,
-                )?;
-                debug!(
-                    "generated audio extract command for {}",
-                    path.to_string_lossy()
-                );
+    if !args.no_media {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
 
-                if args.print_command {
-                    println!("{:?}", command);
-                    Ok(())
-                } else {
-                    match command.status() {
-                        Ok(status) => {
-                            if status.success() {
-                                info!(
-                                    "successfully extracted audio from {}",
-                                    path.to_string_lossy()
-                                );
-                            } else {
-                                error!("{}: FFmpeg exited with an error", path.to_string_lossy());
-                            }
-                        }
-                        Err(err) => {
-                            error!("failed to start ffmpeg command: {:?}", err);
+        pool.scope(|s| {
+            for mut command in commands {
+                s.spawn(move |_| match command.status() {
+                    Ok(exitcode) => {
+                        if exitcode.success() {
+                            trace!("a ffmpeg command exited successfully");
+                        } else {
+                            error!("ffmepg exited with an error");
                         }
                     }
-                    Ok(())
-                }
-            }));
-        }
-
-        for thread in threads {
-            match thread.join() {
-                Ok(result) => {
-                    result?;
-                }
-                Err(_) => return Err(StosError::LabelMe.into()),
+                    Err(err) => {
+                        error!("failed to spawn command: {}", err);
+                    }
+                });
             }
-        }
-        Ok(())
-    })?;
+        });
+        debug!("done?");
+    } else {
+        debug!("did not execute ffmpeg commands because \"--no-media\" was specified");
+    }
+
+    if args.no_deck {
+        debug!("did not create a anki package because \"--no-deck\" was specified");
+    } else {
+        let mut package = generate_package(
+            deck_id,
+            &args.deck_name,
+            &args.deck_desc,
+            &subs,
+            if args.gen_image {
+                Some(&args.image_format)
+            } else {
+                None
+            },
+            if args.gen_audio {
+                Some(&args.audio_format)
+            } else {
+                None
+            },
+        )?;
+
+        debug!("created package");
+        package
+            .write_to_file(&args.output)
+            .context("failed to create anki deck package")?;
+        info!("wrote package to {}", &args.output);
+    }
+
+    //Get subtitles
+    //Generate deck
+    //Generate media
     Ok(())
 }
