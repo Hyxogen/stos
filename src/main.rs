@@ -9,6 +9,7 @@ use genanki_rs::{Deck, Field, Model, Note, Package, Template};
 use glob::glob;
 use log::{debug, error, info, trace, warn};
 use rand::random;
+use rayon::prelude::*;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
@@ -480,7 +481,7 @@ fn extract_images(
         )
     })?;
 
-    decoder.skip_frame(ffmpeg::codec::discard::Discard::NonKey);
+    //decoder.skip_frame(ffmpeg::codec::discard::Discard::NonKey);
 
     let mut scaler = ffmpeg::software::scaling::context::Context::get(
         decoder.format(),
@@ -677,60 +678,43 @@ fn main() -> Result<()> {
         }
 
         if args.gen_image {
-            let subs = &subs;
-            let media_files = &media_files;
+            let (sender, receiver) = unbounded();
+            let subs = subs.clone();
+            let file_count = media_files.len();
             let image_format = &args.image_format;
 
-            let (sender, receiver) = unbounded();
+            let iter = (
+                rayon::iter::repeatn(sender, media_files.len()),
+                media_files,
+                subs,
+            )
+                .into_par_iter()
+                .enumerate()
+                .map(|(file_idx, (sender, media_file, list))| {
+                    let values = FormatValues {
+                        file_idx,
+                        file_count,
+                        sub_idx: 0,
+                        sub_count: list.len(),
+                    };
 
-            let file_count = media_files.len().min(sub_files.len());
-            let decode_count = 2;
-            let chunk_size = (file_count + (decode_count - 1)) / decode_count;
+                    match extract_images(values, image_format, &media_file, &list, sender) {
+                        Ok(_) => {
+                            debug!("{}: Decoded all images", media_file.to_string_lossy());
+                        }
+                        Err(err) => {
+                            error!(
+                                "{}: Failed to decode image: {}",
+                                media_file.to_string_lossy(),
+                                err
+                            );
+                        }
+                    }
+                    ()
+                });
+            info!("here");
 
             thread::scope(|s| {
-                std::iter::repeat(sender)
-                    .take(decode_count)
-                    .enumerate()
-                    .for_each(|(idx, sender)| {
-                        let start_offset = chunk_size * idx;
-                        s.spawn(move || {
-                            std::iter::repeat(sender)
-                                .take((start_offset + chunk_size).min(file_count) - start_offset)
-                                .enumerate()
-                                .for_each(|(offset, sender)| {
-                                    let file_idx = start_offset + offset;
-                                    let values = FormatValues {
-                                        file_idx,
-                                        file_count,
-                                        sub_idx: 0,
-                                        sub_count: subs[file_idx].len(),
-                                    };
-
-                                    match extract_images(
-                                        values,
-                                        image_format,
-                                        &media_files[file_idx],
-                                        &subs[file_idx],
-                                        sender,
-                                    ) {
-                                        Ok(_) => {
-                                            debug!(
-                                                "{}: decoded all images",
-                                                (&media_files[file_idx]).to_string_lossy()
-                                            );
-                                        }
-                                        Err(err) => {
-                                            debug!(
-                                                "{}: failed to decode images: {}",
-                                                (&media_files[file_idx]).to_string_lossy(),
-                                                err
-                                            );
-                                        }
-                                    }
-                                });
-                        });
-                    });
-
                 for _ in 0..12 {
                     s.spawn(|| match convert_and_write_images(receiver.clone()) {
                         Ok(_) => {
@@ -741,51 +725,10 @@ fn main() -> Result<()> {
                         }
                     });
                 }
+
+                iter.collect::<Vec<()>>();
             });
-            info!("here");
         }
-
-        /*
-        if args.gen_image {
-            pool.scope(|s| {
-                let image_format2 = args.image_format.as_str();
-                for (file_idx, (list, media_file)) in
-                    subs2.into_iter().zip(media_files.iter()).enumerate()
-                {
-                    s.spawn(move |_| {
-                        let images = extract_images(media_file, &list).with_context(|| {
-                            format!("{}: Failed to extract images", media_file.to_string_lossy())
-                        });
-
-                        match images {
-                            Ok(images) => {
-                                for (sub_idx, (_, image)) in list.iter().zip(images).enumerate() {
-                                    let values = FormatValues {
-                                        file_idx,
-                                        file_count: subs2_len,
-                                        sub_idx,
-                                        sub_count: list.len(),
-                                    };
-
-                                    match image.save(format_filename(image_format2, values)) {
-                                        Ok(_) => {
-                                            trace!("wrote an image");
-                                        }
-                                        Err(err) => {
-                                            error!("failed to save image: {}", err);
-                                        }
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                error!("{}", err);
-                            }
-                        }
-                        debug!("extracted images!");
-                    });
-                }
-            });
-        }*/
     }
 
     if args.print_command {
