@@ -679,40 +679,6 @@ fn main() -> Result<()> {
 
         if args.gen_image {
             let (sender, receiver) = unbounded();
-            let subs = subs.clone();
-            let file_count = media_files.len();
-            let image_format = &args.image_format;
-
-            let iter = (
-                rayon::iter::repeatn(sender, media_files.len()),
-                media_files,
-                subs,
-            )
-                .into_par_iter()
-                .enumerate()
-                .map(|(file_idx, (sender, media_file, list))| {
-                    let values = FormatValues {
-                        file_idx,
-                        file_count,
-                        sub_idx: 0,
-                        sub_count: list.len(),
-                    };
-
-                    match extract_images(values, image_format, &media_file, &list, sender) {
-                        Ok(_) => {
-                            debug!("{}: Decoded all images", media_file.to_string_lossy());
-                        }
-                        Err(err) => {
-                            error!(
-                                "{}: Failed to decode image: {}",
-                                media_file.to_string_lossy(),
-                                err
-                            );
-                        }
-                    }
-                    ()
-                });
-            info!("here");
 
             thread::scope(|s| {
                 for _ in 0..12 {
@@ -725,8 +691,41 @@ fn main() -> Result<()> {
                         }
                     });
                 }
+                trace!("started converters");
 
-                iter.collect::<Vec<()>>();
+                let subs = subs.clone();
+                let file_count = media_files.len();
+                let image_format = &args.image_format;
+
+                (
+                    rayon::iter::repeatn(sender, media_files.len()),
+                    media_files,
+                    subs,
+                )
+                    .into_par_iter()
+                    .enumerate()
+                    .for_each(|(file_idx, (sender, media_file, list))| {
+                        let values = FormatValues {
+                            file_idx,
+                            file_count,
+                            sub_idx: 0,
+                            sub_count: list.len(),
+                        };
+
+                        match extract_images(values, image_format, &media_file, &list, sender) {
+                            Ok(_) => {
+                                debug!("{}: Decoded all images", media_file.to_string_lossy());
+                            }
+                            Err(err) => {
+                                error!(
+                                    "{}: Failed to decode image: {}",
+                                    media_file.to_string_lossy(),
+                                    err
+                                );
+                            }
+                        }
+                    });
+                info!("converted all images");
             });
         }
     }
