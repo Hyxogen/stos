@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 clap = { version = "4.3.1", features = ["derive"] }
 clap-verbosity-flag = "2.0.1"
+crossbeam-channel = "0.5.8"
 ffmpeg-next = "6.0.0"
 genanki-rs = "0.3.1"
 glob = "0.3.1"

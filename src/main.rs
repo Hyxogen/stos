@@ -4,6 +4,7 @@ mod subtitle;
 
 use anyhow::{Context, Error, Result};
 use clap::Parser;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use genanki_rs::{Deck, Field, Model, Note, Package, Template};
 use glob::glob;
 use log::{debug, error, info, trace, warn};
@@ -11,6 +12,7 @@ use rand::random;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread;
 
 use ffmpeg::{
     codec, decoder, media, util::frame, util::mathematics::rescale::Rescale,
@@ -348,36 +350,6 @@ fn format_filename(format: &str, values: FormatValues) -> String {
         .replace("%s", &format!("{:0sub_width$}", values.sub_idx))
 }
 
-fn generate_image_commands(
-    subs: &Vec<SubtitleList>,
-    media_files: &Vec<PathBuf>,
-    image_fmt: &str,
-) -> Vec<Command> {
-    let mut commands = Vec::new();
-
-    for (file_idx, (list, media_file)) in subs.iter().zip(media_files.iter()).enumerate() {
-        for (sub_idx, sub) in list.iter().enumerate() {
-            let values = FormatValues {
-                file_idx,
-                file_count: subs.len(),
-                sub_idx,
-                sub_count: list.len(),
-            };
-
-            let start = Timestamp::new(sub.start, list.time_base);
-            let mut command = Command::new("ffmpeg");
-
-            command.arg("-ss").arg(start.to_string());
-            command.arg("-frames:v").arg("1");
-            command.arg(format_filename(image_fmt, values));
-            command.arg("-loglevel").arg("warning");
-            command.arg("-i").arg(media_file);
-            commands.push(command);
-        }
-    }
-    commands
-}
-
 fn generate_audio_commands(
     subs: &Vec<SubtitleList>,
     audio_files: &Vec<PathBuf>,
@@ -454,7 +426,24 @@ fn convert_frames(
     Ok(images)
 }
 
-fn extract_images(file: &PathBuf, list: &SubtitleList) -> Result<Vec<image::RgbImage>> {
+fn convert_and_write_images(receiver: Receiver<(String, image::RgbImage)>) -> Result<()> {
+    while let Ok((file, image)) = receiver.recv() {
+        image
+            .save(&file)
+            .with_context(|| format!("{}: Failed to write image", file))?;
+        trace!("wrote to {}", file);
+    }
+    trace!("no more images to convert");
+    Ok(())
+}
+
+fn extract_images(
+    mut values: FormatValues,
+    format: &str,
+    file: &PathBuf,
+    list: &SubtitleList,
+    sender: Sender<(String, image::RgbImage)>,
+) -> Result<()> {
     let file_str = file.to_string_lossy();
 
     let mut ictx = ffmpeg::format::input(&file).context("Failed to open file")?;
@@ -504,19 +493,16 @@ fn extract_images(file: &PathBuf, list: &SubtitleList) -> Result<Vec<image::RgbI
     )
     .with_context(|| format!("{}: Failed to create scaler", file_str))?;
     trace!("created scaler");
-
-    let mut sub_idx = 0;
-
-    let mut images = Vec::new();
+    values.sub_idx = 0;
 
     let mut receive_and_process_frame = |decoder: &mut ffmpeg::decoder::Video| -> Result<()> {
         let mut decoded = frame::video::Video::empty();
         while decoder.receive_frame(&mut decoded).is_ok() {
-            if sub_idx >= list.len() {
+            if values.sub_idx >= list.len() {
                 break;
             }
 
-            if decoded.pts().unwrap_or(0) < list[sub_idx].start {
+            if decoded.pts().unwrap_or(0) < list[values.sub_idx].start {
                 continue;
             }
 
@@ -532,10 +518,15 @@ fn extract_images(file: &PathBuf, list: &SubtitleList) -> Result<Vec<image::RgbI
                 rgb_frame.data(0).to_vec(),
             );
 
-            images.push(image.ok_or(Error::msg("Failed to convert frame to image"))?);
+            sender
+                .send((
+                    format_filename(format, values),
+                    image.ok_or(Error::msg("Failed to convert frame to image"))?,
+                ))
+                .context("failed to send image")?;
 
-            sub_idx += 1;
-            trace!("{}/{}", sub_idx, list.len());
+            values.sub_idx += 1;
+            trace!("{}/{}", values.sub_idx, list.len());
         }
         Ok(())
     };
@@ -555,16 +546,15 @@ fn extract_images(file: &PathBuf, list: &SubtitleList) -> Result<Vec<image::RgbI
         .context("Failed to send EOF to the decoder")?;
     receive_and_process_frame(&mut decoder)?;
 
-    if images.len() < list.len() {
+    if values.sub_idx < list.len() {
         warn!(
             "the video stream is shorter than the subtitle stream, only extracted {} images",
-            images.len()
+            values.sub_idx
         );
     }
 
-    debug!("converted {} frames to images", images.len());
-
-    Ok(images)
+    debug!("converted {} frames to images", values.sub_idx);
+    Ok(())
 }
 
 fn generate_package(
@@ -686,9 +676,76 @@ fn main() -> Result<()> {
             commands.extend(audio_commands);
         }
 
-        let subs2 = subs.clone();
-        let subs2_len = subs2.len();
+        if args.gen_image {
+            let subs = &subs;
+            let media_files = &media_files;
+            let image_format = &args.image_format;
 
+            let (sender, receiver) = unbounded();
+
+            let file_count = media_files.len().min(sub_files.len());
+            let decode_count = 2;
+            let chunk_size = (file_count + (decode_count - 1)) / decode_count;
+
+            thread::scope(|s| {
+                std::iter::repeat(sender)
+                    .take(decode_count)
+                    .enumerate()
+                    .for_each(|(idx, sender)| {
+                        let start_offset = chunk_size * idx;
+                        s.spawn(move || {
+                            std::iter::repeat(sender)
+                                .take((start_offset + chunk_size).min(file_count) - start_offset)
+                                .enumerate()
+                                .for_each(|(offset, sender)| {
+                                    let file_idx = start_offset + offset;
+                                    let values = FormatValues {
+                                        file_idx,
+                                        file_count,
+                                        sub_idx: 0,
+                                        sub_count: subs[file_idx].len(),
+                                    };
+
+                                    match extract_images(
+                                        values,
+                                        image_format,
+                                        &media_files[file_idx],
+                                        &subs[file_idx],
+                                        sender,
+                                    ) {
+                                        Ok(_) => {
+                                            debug!(
+                                                "{}: decoded all images",
+                                                (&media_files[file_idx]).to_string_lossy()
+                                            );
+                                        }
+                                        Err(err) => {
+                                            debug!(
+                                                "{}: failed to decode images: {}",
+                                                (&media_files[file_idx]).to_string_lossy(),
+                                                err
+                                            );
+                                        }
+                                    }
+                                });
+                        });
+                    });
+
+                for _ in 0..12 {
+                    s.spawn(|| match convert_and_write_images(receiver.clone()) {
+                        Ok(_) => {
+                            trace!("converted an image");
+                        }
+                        Err(err) => {
+                            error!("failed to convert image: {}", err);
+                        }
+                    });
+                }
+            });
+            info!("here");
+        }
+
+        /*
         if args.gen_image {
             pool.scope(|s| {
                 let image_format2 = args.image_format.as_str();
@@ -728,7 +785,7 @@ fn main() -> Result<()> {
                     });
                 }
             });
-        }
+        }*/
     }
 
     if args.print_command {

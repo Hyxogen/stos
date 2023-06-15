@@ -131,8 +131,8 @@ impl SubtitleList {
         self.subs.iter()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.subs.is_empty()
+    pub fn vec(&self) -> &Vec<Subtitle> {
+        &self.subs
     }
 
     pub fn len(&self) -> usize {
