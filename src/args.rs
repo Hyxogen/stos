@@ -3,6 +3,7 @@ use log::LevelFilter;
 use std::path::PathBuf;
 
 pub struct Args {
+    pub executable: String,
     pub sub_files: Vec<PathBuf>,
     pub sub_stream: Option<usize>,
 
@@ -20,6 +21,7 @@ pub struct Args {
 impl Default for Args {
     fn default() -> Self {
         Self {
+            executable: "ffmpeg".to_string(),
             sub_files: Default::default(),
             sub_stream: Default::default(),
             media_files: Default::default(),
@@ -41,6 +43,11 @@ impl Args {
         let mut subtitles = true;
 
         let mut parser = lexopt::Parser::from_env();
+
+        if let Some(executable) = parser.bin_name() {
+            args.executable = executable.to_string();
+        }
+
         while let Some(arg) = parser.next()? {
             match arg {
                 Short('m') | Long("media") => {
