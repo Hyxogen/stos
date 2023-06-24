@@ -1,5 +1,54 @@
 use anyhow::{Error, Result};
 use libav::media;
+use libav::mathematics::rescale::Rescale;
+use libav::util::rational::Rational;
+use std::fmt;
+use std::ops::Add;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Timestamp(pub i64);
+
+impl Timestamp {
+    pub const fn from_ms(ms: u32) -> Self {
+        Self(ms as i64)
+    }
+
+    pub fn from_timebase(ts: i64, time_base: Rational) -> Result<Self> {
+        let ts = ts.rescale(time_base, Self::time_base());
+
+        if ts < 0 {
+            Err(Error::msg("Timestamp is negative"))
+        } else {
+            Ok(Self(ts))
+        }
+    }
+
+    pub const fn time_base() -> Rational {
+        Rational(1, 1000000000)
+    }
+}
+
+impl fmt::Display for Timestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ts = self.0.rescale(Self::time_base(), Rational::new(1, 1000000));
+        write!(
+            f,
+            "{}:{:02}:{:02}.{:03}",
+            ts / (1000 * 1000 * 60 * 60),
+            (ts / (1000 * 1000 * 60)) % 60,
+            (ts / (1000 * 1000)) % 60,
+            (ts / 1000) % 1000
+        )
+    }
+}
+
+impl Add for Timestamp {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
+    }
+}
 
 trait Name {
     fn name(&self) -> &'static str;
