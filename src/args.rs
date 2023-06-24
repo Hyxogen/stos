@@ -1,11 +1,13 @@
 use anyhow::Result;
 use log::LevelFilter;
+use rand::random;
 use std::path::PathBuf;
 
 pub struct Args {
     pub executable: String,
     pub sub_files: Vec<PathBuf>,
     pub sub_stream: Option<usize>,
+    pub sub_format: String,
 
     pub media_files: Vec<PathBuf>,
 
@@ -15,6 +17,15 @@ pub struct Args {
 
     pub gen_image: bool,
     pub image_format: String,
+
+    pub no_media: bool,
+    pub no_deck: bool,
+
+    pub deck_id: i64,
+    pub deck_name: String,
+    pub deck_desc: String,
+    pub package: PathBuf,
+
     pub verbosity: LevelFilter,
 }
 
@@ -24,12 +35,19 @@ impl Default for Args {
             executable: "ffmpeg".to_string(),
             sub_files: Default::default(),
             sub_stream: Default::default(),
+            sub_format: "sub_%f_%s_%r.jpg".to_string(),
             media_files: Default::default(),
             gen_audio: false,
             audio_stream: Default::default(),
             audio_format: "out_%f_%s.mka".to_string(),
             gen_image: false,
             image_format: "out_%f_%s.jpg".to_string(),
+            no_media: false,
+            no_deck: false,
+            deck_id: random(),
+            deck_name: "Stos Deck".to_string(),
+            deck_desc: "A deck generater by stos".to_string(),
+            package: "deck.apkg".into(),
             verbosity: LevelFilter::Error,
         }
     }
@@ -80,6 +98,12 @@ impl Args {
                         eprintln!("Failed to parse \"--image-format\" option: Invalid unicode");
                         std::process::exit(1);
                     }
+                }
+                Long("no-media") => {
+                    args.no_media = true;
+                }
+                Long("no-deck") => {
+                    args.no_deck = true;
                 }
                 Short('v') => {
                     args.verbosity = LevelFilter::Warn;

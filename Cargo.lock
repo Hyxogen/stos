@@ -511,8 +511,7 @@ checksum = "f43be4fe21a13b9781a69afa4985b0f6ee0e1afab2c6f454a8cf30e2b2237b6e"
 [[package]]
 name = "genanki-rs"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "917f799dcd5a73c7ce7efcb5125df8671150154a3932e6c25b786ddfb9853565"
+source = "git+https://github.com/Hyxogen/genanki-rs.git#b948ac7d0171ad3483bccf0dd233ef629808f033"
 dependencies = [
  "fancy-regex",
  "ramhorns",

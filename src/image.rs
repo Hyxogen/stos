@@ -22,7 +22,7 @@ pub fn write_images(receiver: Receiver<(String, RgbImage)>) -> Result<()> {
 
 pub fn extract_images(
     file: &PathBuf,
-    subs: &Vec<Subtitle>,
+    subs: &[Subtitle],
     mut format: Format<'_>,
     sender: Sender<(String, RgbImage)>,
 ) -> Result<()> {

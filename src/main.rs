@@ -1,9 +1,11 @@
 extern crate ffmpeg_next as libav;
 use anyhow::{Context, Result};
 use crossbeam_channel::unbounded;
-use log::{error, trace, warn};
+use genanki_rs::{Deck, Package};
+use log::{debug, error, info, trace};
 use rayon::ThreadPoolBuilder;
 
+mod anki;
 mod args;
 mod audio;
 mod format;
@@ -12,10 +14,11 @@ mod subtitle;
 mod util;
 
 use crate::image::*;
+use anki::*;
 use args::Args;
 use audio::generate_audio_commands;
-use subtitle::{read_subtitles, Subtitle};
 use format::Format;
+use subtitle::{read_subtitles, Subtitle};
 
 fn main() -> Result<()> {
     let args = Args::parse_from_env()?;
@@ -58,57 +61,105 @@ fn main() -> Result<()> {
         Default::default()
     };
 
-    let image_format = &args.image_format;
-
-    ThreadPoolBuilder::new().build().unwrap().scope_fifo(|s| {
-        let (sender, receiver) = unbounded();
-        for command in commands.iter_mut() {
-            s.spawn_fifo(|_| match command.status() {
-                Ok(exitcode) => {
-                    if exitcode.success() {
-                        trace!("a FFmpeg command exited successfully");
-                    } else {
-                        error!("a FFmpeg command exited with an error");
-                    }
-                }
-                Err(err) => {
-                    error!("failed to spawn command: {}", err);
-                }
-            });
-        }
-
-        if args.gen_image {
-            std::iter::repeat(receiver).take(4).for_each(|receiver| {
-                s.spawn_fifo(|_| match write_images(receiver) {
-                    Ok(_) => {
-                        trace!("converted images");
+    if !args.no_media {
+        let image_format = &args.image_format;
+        ThreadPoolBuilder::new().build().unwrap().scope_fifo(|s| {
+            let (sender, receiver) = unbounded();
+            for command in commands.iter_mut() {
+                s.spawn_fifo(|_| match command.status() {
+                    Ok(exitcode) => {
+                        if exitcode.success() {
+                            trace!("a FFmpeg command exited successfully");
+                        } else {
+                            error!("a FFmpeg command exited with an error");
+                        }
                     }
                     Err(err) => {
-                        error!("failed  to convert images: {}", err);
+                        error!("failed to spawn command: {}", err);
                     }
                 });
-            });
-            let file_count = media_files.len();
+            }
 
-            std::iter::repeat(sender)
-                .take(8)
-                .zip(subtitles.iter())
-                .zip(media_files.iter())
-                .enumerate()
-                .for_each(|(idx, ((sender, subs), media_file))| {
-                    let mut format = Format::new(subs.len(), file_count, image_format).unwrap();
-                    format.file_index = idx;
-                    s.spawn_fifo(move |_| match extract_images(media_file, subs, format, sender) {
+            if args.gen_image {
+                std::iter::repeat(receiver).take(4).for_each(|receiver| {
+                    s.spawn_fifo(|_| match write_images(receiver) {
                         Ok(_) => {
-                            trace!("{}: Decoded all images", media_file.to_string_lossy());
-                        },
+                            trace!("converted images");
+                        }
                         Err(err) => {
-                            error!("{}: Failed to decode images: {:?}", media_file.to_string_lossy(), err);
-                        },
-
+                            error!("failed  to convert images: {}", err);
+                        }
                     });
                 });
-        }
-    });
+                let file_count = media_files.len();
+
+                std::iter::repeat(sender)
+                    .take(8)
+                    .zip(subtitles.iter())
+                    .zip(media_files.iter())
+                    .enumerate()
+                    .for_each(|(idx, ((sender, subs), media_file))| {
+                        let mut format = Format::new(subs.len(), file_count, image_format).unwrap();
+                        format.file_index = idx;
+                        s.spawn_fifo(move |_| {
+                            match extract_images(media_file, subs, format, sender) {
+                                Ok(_) => {
+                                    trace!("{}: Decoded all images", media_file.to_string_lossy());
+                                }
+                                Err(err) => {
+                                    error!(
+                                        "{}: Failed to decode images: {:?}",
+                                        media_file.to_string_lossy(),
+                                        err
+                                    );
+                                }
+                            }
+                        });
+                    });
+            }
+        });
+    } else {
+        debug!("did not output any media files because \"--no-media\" was specified");
+    }
+
+    let (notes, media) = create_all_notes(
+        &subtitles,
+        &args.sub_format,
+        args.gen_image.then_some(&args.image_format),
+        args.gen_audio.then_some(&args.audio_format),
+    )?;
+    trace!("created {} notes", notes.len());
+
+    let mut deck = Deck::new(args.deck_id, &args.deck_name, &args.deck_desc);
+    trace!("created anki deck \"{}\"", args.deck_name);
+
+    for note in notes {
+        deck.add_note(note);
+    }
+
+    let mut package = Package::new(
+        vec![deck],
+        media
+            .iter()
+            .map(|x| {
+                trace!("{}", x);
+                x.as_str()
+            })
+            .collect(),
+    )
+    .context("failed to create anki package")?;
+    trace!("created package");
+
+    if !args.no_deck {
+        package.write_to_file(&args.package).with_context(|| {
+            format!(
+                "{}: Failed to save package to file",
+                args.package.to_string_lossy()
+            )
+        })?;
+        info!("wrote package to {}", &args.package.to_string_lossy());
+    } else {
+        debug!("did not output a package files because \"--no-deck\" was specified");
+    }
     Ok(())
 }

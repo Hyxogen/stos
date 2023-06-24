@@ -8,6 +8,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Rect {
     Text(String),
+    Bitmap(String),
 }
 
 impl From<subtitle::Rect<'_>> for Rect {
@@ -23,7 +24,7 @@ impl From<subtitle::Rect<'_>> for Rect {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Subtitle {
-    rects: Vec<Rect>,
+    pub rects: Vec<Rect>,
     pub start: Timestamp,
     pub end: Timestamp,
 }
@@ -60,6 +61,10 @@ impl Subtitle {
                 rects: sub.rects().map(From::from).collect(),
             })
         }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Rect> {
+        self.rects.iter()
     }
 
     pub fn overlaps(&self, other: &Self) -> bool {

@@ -9,7 +9,7 @@ use std::process::Command;
 
 fn generate_audio_command(
     file: &PathBuf,
-    subs: &Vec<Subtitle>,
+    subs: &[Subtitle],
     stream_index: Option<usize>,
     mut format: Format<'_>,
 ) -> Result<Command> {
@@ -44,7 +44,7 @@ fn generate_audio_command(
 }
 
 pub fn generate_audio_commands(
-    audio_files: &Vec<PathBuf>,
+    audio_files: &[PathBuf],
     subtitles: &Vec<Vec<Subtitle>>,
     audio_stream: Option<usize>,
     format: &str,

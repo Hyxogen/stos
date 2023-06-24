@@ -1,6 +1,6 @@
 use anyhow::{Error, Result};
-use libav::media;
 use libav::mathematics::rescale::Rescale;
+use libav::media;
 use libav::util::rational::Rational;
 use std::fmt;
 use std::ops::Add;

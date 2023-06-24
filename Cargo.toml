@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 crossbeam-channel = "0.5.8"
 ffmpeg-next = "6.0.0"
-genanki-rs = "0.3.1"
+genanki-rs = { git = "https://github.com/Hyxogen/genanki-rs.git", version = "0.3.1" }
 image = "0.24.6"
 lexopt = "0.3.0"
 log = "0.4.18"
