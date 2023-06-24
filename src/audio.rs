@@ -18,7 +18,7 @@ fn generate_audio_command(
     let ictx = libav::format::input(file).context("Failed to open file")?;
     trace!("Opened {}", file_str);
 
-    let stream_index = get_stream(ictx.streams(), media::Type::Subtitle, stream_index)
+    let stream_index = get_stream(ictx.streams(), media::Type::Audio, stream_index)
         .with_context(|| format!("{}: Failed to retrieve audio stream", file_str))?
         .index();
     debug!("{}: Using audio stream at index {}", file_str, stream_index);

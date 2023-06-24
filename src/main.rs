@@ -58,10 +58,11 @@ fn main() -> Result<()> {
         Default::default()
     };
 
+    let image_format = &args.image_format;
+
     ThreadPoolBuilder::new().build().unwrap().scope_fifo(|s| {
         let (sender, receiver) = unbounded();
         for command in commands.iter_mut() {
-            println!("{:?}", command);
             s.spawn_fifo(|_| match command.status() {
                 Ok(exitcode) => {
                     if exitcode.success() {
@@ -95,14 +96,14 @@ fn main() -> Result<()> {
                 .zip(media_files.iter())
                 .enumerate()
                 .for_each(|(idx, ((sender, subs), media_file))| {
-                    let mut format = Format::new(subs.len(), file_count, "").unwrap();
+                    let mut format = Format::new(subs.len(), file_count, image_format).unwrap();
                     format.file_index = idx;
                     s.spawn_fifo(move |_| match extract_images(media_file, subs, format, sender) {
                         Ok(_) => {
                             trace!("{}: Decoded all images", media_file.to_string_lossy());
                         },
                         Err(err) => {
-                            error!("{}: Failed to decode images: {}", media_file.to_string_lossy(), err);
+                            error!("{}: Failed to decode images: {:?}", media_file.to_string_lossy(), err);
                         },
 
                     });
