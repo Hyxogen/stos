@@ -7,6 +7,7 @@ use rayon::ThreadPoolBuilder;
 
 mod anki;
 mod args;
+mod ass;
 mod audio;
 mod format;
 mod image;

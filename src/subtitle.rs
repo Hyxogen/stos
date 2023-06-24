@@ -1,3 +1,4 @@
+use crate::ass::DialogueEvent;
 use crate::util::{get_stream, Timestamp};
 use anyhow::{Context, Error, Result};
 use libav::util::rational::Rational;
@@ -8,15 +9,17 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Rect {
     Text(String),
+    Ass(DialogueEvent),
     Bitmap(String),
 }
 
-impl From<subtitle::Rect<'_>> for Rect {
-    fn from(rect: subtitle::Rect) -> Self {
+impl TryFrom<subtitle::Rect<'_>> for Rect {
+    type Error = Error;
+
+    fn try_from(rect: subtitle::Rect) -> Result<Self> {
         match rect {
-            subtitle::Rect::Text(text) => Rect::Text(text.get().to_string()),
-            subtitle::Rect::Ass(ass) => Rect::Text(ass.get().to_string()),
-            subtitle::Rect::Bitmap(_) => Rect::Text("".to_string()),
+            subtitle::Rect::Text(text) => Ok(Rect::Text(text.get().to_string())),
+            subtitle::Rect::Ass(ass) => Ok(Rect::Ass(ass.try_into()?)),
             _ => todo!(),
         }
     }
@@ -54,12 +57,27 @@ impl Subtitle {
             if end < start {
                 warn!("subtitle end is before start, will swap");
             }
+            let rects: Vec<Rect> = sub
+                .rects()
+                .map(TryFrom::try_from)
+                .filter_map(|rect| match rect {
+                    Ok(rect) => Some(rect),
+                    Err(err) => {
+                        warn!("failed to convert a rect: {}", err);
+                        None
+                    }
+                })
+                .collect();
 
-            Ok(Self {
-                start: start.min(end),
-                end: end.max(start),
-                rects: sub.rects().map(From::from).collect(),
-            })
+            if rects.is_empty() {
+                Err(Error::msg("No rects"))
+            } else {
+                Ok(Self {
+                    start: start.min(end),
+                    end: end.max(start),
+                    rects,
+                })
+            }
         }
     }
 
@@ -145,7 +163,6 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
     } else {
         debug!("{}: Read {} subtitle(s)", file_str, subs.len());
     }
-
     Ok(subs)
 }
 

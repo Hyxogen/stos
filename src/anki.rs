@@ -26,6 +26,7 @@ fn create_note(
 
     let text_field = match rect {
         Rect::Text(text) => text.clone(),
+        Rect::Ass(ass) => ass.text.dialogue.clone(),
         Rect::Bitmap(_) => {
             let sub_image = sub_format.to_string();
             media.push(sub_image.clone()); //TODO basename only
