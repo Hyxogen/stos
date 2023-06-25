@@ -100,6 +100,7 @@ pub fn extract_images(
             sender
                 .send((format.to_string(), image))
                 .context("Failed to send image")?;
+            trace!("{}: Sent a frame to be converted", file_str);
 
             format.sub_index += 1;
         }

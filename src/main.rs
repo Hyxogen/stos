@@ -19,7 +19,7 @@ use anki::*;
 use args::Args;
 use audio::generate_audio_commands;
 use format::Format;
-use subtitle::{read_subtitles, Subtitle};
+use subtitle::{merge_overlapping, read_subtitles, Subtitle};
 
 fn main() -> Result<()> {
     let args = Args::parse_from_env()?;
@@ -40,7 +40,21 @@ fn main() -> Result<()> {
     let subtitles = args
         .sub_files
         .iter()
-        .map(|file| read_subtitles(file, args.sub_stream))
+        .map(|file| match read_subtitles(file, args.sub_stream) {
+            Ok(subs) if args.coalesce => {
+                let before = subs.len();
+                let subs = merge_overlapping(subs);
+                debug!(
+                    "{}: Coalesced {} subs into {}",
+                    file.to_string_lossy(),
+                    before,
+                    subs.len()
+                );
+                Ok(subs)
+            }
+            Ok(subs) => Ok(subs),
+            Err(err) => Err(err),
+        })
         .collect::<Result<Vec<Vec<Subtitle>>>>()?;
     trace!("read all subtitles from {} file(s)", subtitles.len());
 
@@ -138,17 +152,8 @@ fn main() -> Result<()> {
         deck.add_note(note);
     }
 
-    let mut package = Package::new(
-        vec![deck],
-        media
-            .iter()
-            .map(|x| {
-                trace!("{}", x);
-                x.as_str()
-            })
-            .collect(),
-    )
-    .context("failed to create anki package")?;
+    let mut package = Package::new(vec![deck], media.iter().map(|x| x.as_str()).collect())
+        .context("failed to create anki package")?;
     trace!("created package");
 
     if !args.no_deck {

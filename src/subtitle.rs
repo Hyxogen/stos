@@ -82,7 +82,15 @@ impl Subtitle {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Rect> {
+        //TODO remove
         self.rects.iter()
+    }
+
+    pub fn merge(&mut self, other: Self) -> &mut Self {
+        self.start = self.start.min(other.start);
+        self.end = self.end.min(other.end);
+        self.rects.extend(other.rects);
+        self
     }
 
     pub fn overlaps(&self, other: &Self) -> bool {
@@ -164,6 +172,26 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
         debug!("{}: Read {} subtitle(s)", file_str, subs.len());
     }
     Ok(subs)
+}
+
+pub fn merge_overlapping(subtitles: Vec<Subtitle>) -> Vec<Subtitle> {
+    let mut result = Vec::new();
+
+    for sub in subtitles {
+        if result.is_empty() {
+            result.push(sub);
+        } else {
+            let last_idx = result.len() - 1;
+            let prev_sub = &mut result[last_idx];
+
+            if !prev_sub.overlaps(&sub) {
+                result.push(sub);
+            } else {
+                prev_sub.merge(sub);
+            }
+        }
+    }
+    result
 }
 
 #[cfg(test)]

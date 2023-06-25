@@ -9,6 +9,8 @@ pub struct Args {
     pub sub_stream: Option<usize>,
     pub sub_format: String,
 
+    pub coalesce: bool,
+
     pub media_files: Vec<PathBuf>,
 
     pub gen_audio: bool,
@@ -36,6 +38,7 @@ impl Default for Args {
             sub_files: Default::default(),
             sub_stream: Default::default(),
             sub_format: "sub_%f_%s_%r.jpg".to_string(),
+            coalesce: false,
             media_files: Default::default(),
             gen_audio: false,
             audio_stream: Default::default(),
@@ -104,6 +107,9 @@ impl Args {
                 }
                 Long("no-deck") => {
                     args.no_deck = true;
+                }
+                Short('c') | Long("coalesce") => {
+                    args.coalesce = true;
                 }
                 Short('v') => {
                     args.verbosity = LevelFilter::Warn;
