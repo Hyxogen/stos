@@ -19,7 +19,7 @@ use anki::*;
 use args::Args;
 use audio::generate_audio_commands;
 use format::Format;
-use subtitle::{merge_overlapping, read_subtitles, Subtitle};
+use subtitle::{merge_overlapping, read_subtitles, Rect, Subtitle};
 
 fn main() -> Result<()> {
     let args = Args::parse_from_env()?;
@@ -94,18 +94,36 @@ fn main() -> Result<()> {
                     }
                 });
             }
+            std::iter::repeat(receiver).take(4).for_each(|receiver| {
+                s.spawn_fifo(|_| match write_images(receiver) {
+                    Ok(_) => {
+                        trace!("converted images");
+                    }
+                    Err(err) => {
+                        error!("failed  to convert images: {}", err);
+                    }
+                });
+            });
+
+            for (file_idx, list) in subtitles.iter().enumerate() {
+                for (sub_idx, sub) in list.iter().enumerate() {
+                    for (rect_idx, rect) in sub.rects.iter().enumerate() {
+                        let mut format =
+                            Format::new(list.len(), subtitles.len(), &args.sub_format).unwrap();
+                        format.set_rect_count(sub.rects.len()).unwrap();
+                        format.file_index = file_idx;
+                        format.sub_index = sub_idx;
+                        format.rect_index = rect_idx;
+                        if let Rect::Bitmap(image) = rect {
+                            sender
+                                .send((format.to_string(), image.clone().into()))
+                                .unwrap();
+                        }
+                    }
+                }
+            }
 
             if args.gen_image {
-                std::iter::repeat(receiver).take(4).for_each(|receiver| {
-                    s.spawn_fifo(|_| match write_images(receiver) {
-                        Ok(_) => {
-                            trace!("converted images");
-                        }
-                        Err(err) => {
-                            error!("failed  to convert images: {}", err);
-                        }
-                    });
-                });
                 let file_count = media_files.len();
 
                 std::iter::repeat(sender)

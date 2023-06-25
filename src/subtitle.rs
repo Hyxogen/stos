@@ -1,16 +1,81 @@
 use crate::ass::DialogueEvent;
 use crate::util::{get_stream, Timestamp};
 use anyhow::{Context, Error, Result};
+use image::RgbaImage;
 use libav::util::rational::Rational;
 use libav::{codec, codec::packet, codec::subtitle, decoder, media};
 use log::{debug, trace, warn};
 use std::path::PathBuf;
+use std::slice;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Rect {
     Text(String),
     Ass(DialogueEvent),
-    Bitmap(String),
+    Bitmap(RgbaImage),
+}
+
+fn bitmap_to_image(bitmap: &libav::codec::subtitle::Bitmap) -> Result<RgbaImage> {
+    let colors = bitmap.colors();
+
+    if colors <= 256 {
+        let width: usize = bitmap
+            .width()
+            .try_into()
+            .context("u32 does not fit in usize")?;
+        let height: usize = bitmap
+            .height()
+            .try_into()
+            .context("u32 does not fit in usize")?;
+
+        let palette_linesize: usize = unsafe { (*bitmap.as_ptr()).linesize[0] }
+            .try_into()
+            .context("invalid palette linesize")?;
+        let indices_linesize: usize = unsafe { (*bitmap.as_ptr()).linesize[0] }
+            .try_into()
+            .context("invalid indices linesize")?;
+
+        let palette = unsafe {
+            slice::from_raw_parts(
+                (*bitmap.as_ptr()).data[1] as *mut u32,
+                width * height * palette_linesize,
+            )
+        };
+
+        let indices = unsafe {
+            slice::from_raw_parts(
+                (*bitmap.as_ptr()).data[0],
+                width * height * indices_linesize,
+            )
+        };
+
+        let mut image = Vec::new();
+
+        for y in 0..height {
+            for x in 0..width {
+                let index: usize = indices[y * indices_linesize + x]
+                    .try_into()
+                    .context("u32 does not fit in usize")?;
+                let argb = palette[index].to_le_bytes();
+                let a = argb[0];
+                let r = argb[1];
+                let g = argb[2];
+                let b = argb[3];
+
+                image.push(r);
+                image.push(g);
+                image.push(b);
+                image.push(a);
+            }
+        }
+
+        Ok(
+            RgbaImage::from_raw(width.try_into().unwrap(), height.try_into().unwrap(), image)
+                .ok_or(Error::msg("failed to convert bitmap image"))?,
+        )
+    } else {
+        Err(Error::msg("unsupported bitmap format"))
+    }
 }
 
 impl TryFrom<subtitle::Rect<'_>> for Rect {
@@ -20,6 +85,76 @@ impl TryFrom<subtitle::Rect<'_>> for Rect {
         match rect {
             subtitle::Rect::Text(text) => Ok(Rect::Text(text.get().to_string())),
             subtitle::Rect::Ass(ass) => Ok(Rect::Ass(ass.try_into()?)),
+            subtitle::Rect::Bitmap(bitmap) => {
+                Ok(Rect::Bitmap(bitmap_to_image(&bitmap)?))
+                /*
+                if bitmap.colors() > 256 {
+                    Err(Error::msg("unsupported bitmap format"))
+                } else {
+                    let width: usize = bitmap.width().try_into().unwrap();
+                    let height: usize = bitmap.height().try_into().unwrap();
+                    let linesize: usize = unsafe { (*bitmap.as_ptr()).linesize[0] }
+                        .try_into()
+                        .unwrap();
+                    let colors = bitmap.colors();
+                    eprintln!(
+                        "width: {}, height: {}, linesize: {}, colors: {}",
+                        width, height, linesize, colors
+                    );
+                    let pal = unsafe {
+                        std::slice::from_raw_parts(
+                            (*bitmap.as_ptr()).data[1] as *mut u32,
+                            width * height * linesize,
+                        )
+                    };
+                    let data = unsafe {
+                        std::slice::from_raw_parts(
+                            (*bitmap.as_ptr()).data[0],
+                            width * height * linesize,
+                        )
+                    };
+
+                    let mut image32 = Vec::new();
+                    for y in 0..height {
+                        for x in 0..width {
+                            let pos: usize = data[y * linesize + x].try_into().unwrap();
+                            image32.push(pal[pos]);
+                        }
+                    }
+
+                    let mut image = Vec::new();
+                    for pixel in image32 {
+                        let bytes = pixel.to_ne_bytes();
+                        let a = bytes[0];
+                        let r = bytes[1].checked_mul(a).unwrap_or(255) / 255;
+                        let g = bytes[2].checked_mul(a).unwrap_or(255) / 255;
+                        let b = bytes[3].checked_mul(a).unwrap_or(255) / 255;
+                        image.push(r);
+                        image.push(g);
+                        image.push(b);
+                        image.push(a);
+                    }
+                    /*
+                    image::RgbaImage::from_raw(
+                        width.try_into().unwrap(),
+                        height.try_into().unwrap(),
+                        image,
+                    )
+                    .unwrap()
+                    .save("test.png")
+                    .unwrap();
+                    panic!();*/
+
+                    Ok(Rect::Bitmap(
+                        RgbaImage::from_raw(
+                            width.try_into().unwrap(),
+                            height.try_into().unwrap(),
+                            image,
+                        )
+                        .unwrap(),
+                    ))
+                }*/
+            }
             _ => todo!(),
         }
     }

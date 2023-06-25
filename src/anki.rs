@@ -30,7 +30,7 @@ fn create_note(
         Rect::Bitmap(_) => {
             let sub_image = sub_format.to_string();
             media.push(sub_image.clone()); //TODO basename only
-            sub_image
+            to_image(&sub_image)
         }
     };
 
@@ -56,6 +56,7 @@ fn create_notes(
     media: &mut Vec<String>,
 ) -> Result<Vec<Note>> {
     let mut notes = Vec::new();
+    let mut index = offset;
 
     for (sub_index, sub) in subs.iter().enumerate() {
         sub_format.set_sub_index(sub_index);
@@ -69,13 +70,14 @@ fn create_notes(
             sub_format.set_rect_index(rect_index);
             notes.push(create_note(
                 model.clone(),
-                &(offset + sub_index + rect_index).to_string(),
+                &index.to_string(),
                 rect,
                 sub_format,
                 image.as_deref(),
                 audio.as_deref(),
                 media,
             )?);
+            index += 1;
         }
     }
     Ok(notes)

@@ -4,12 +4,12 @@ use crate::util::get_stream;
 use crate::util::Timestamp;
 use anyhow::{Context, Error, Result};
 use crossbeam_channel::{Receiver, Sender};
-use image::RgbImage;
+use image::{DynamicImage, RgbImage};
 use libav::{media, software::scaling, util::frame};
 use log::{debug, trace, warn};
 use std::path::PathBuf;
 
-pub fn write_images(receiver: Receiver<(String, RgbImage)>) -> Result<()> {
+pub fn write_images(receiver: Receiver<(String, DynamicImage)>) -> Result<()> {
     while let Ok((file, image)) = receiver.recv() {
         image
             .save(&file)
@@ -24,7 +24,7 @@ pub fn extract_images(
     file: &PathBuf,
     subs: &[Subtitle],
     mut format: Format<'_>,
-    sender: Sender<(String, RgbImage)>,
+    sender: Sender<(String, DynamicImage)>,
 ) -> Result<()> {
     let file_str = file.to_string_lossy();
 
@@ -98,7 +98,7 @@ pub fn extract_images(
             .ok_or(Error::msg("Failed to convert frame to image"))?;
 
             sender
-                .send((format.to_string(), image))
+                .send((format.to_string(), image.into()))
                 .context("Failed to send image")?;
             trace!("{}: Sent a frame to be converted", file_str);
 
