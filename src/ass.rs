@@ -33,12 +33,11 @@ impl FromStr for AssText {
     type Err = AssError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut chars = s.chars();
         let mut escaped = false;
         let mut brackets: u64 = 0;
         let mut dialogue = String::new();
 
-        while let Some(ch) = chars.next() {
+        for ch in s.chars() {
             if ch == '{' {
                 brackets += 1;
             } else if ch == '}' {
@@ -84,8 +83,7 @@ impl FromStr for DialogueEvent {
 
         let name = parts.next().ok_or(AssError::NotEnoughParts)?.to_string();
         let text = parts
-            .skip(4)
-            .next()
+            .nth(4)
             .ok_or(AssError::NotEnoughParts)?
             .parse()?;
         Ok(Self { name, text })
