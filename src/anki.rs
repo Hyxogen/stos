@@ -66,7 +66,7 @@ fn create_notes(
 
         let image = image_format.map(|mut format| format.set_sub_index(sub_index).to_string());
         let audio = audio_format.map(|mut format| format.set_sub_index(sub_index).to_string());
-        for (rect_index, rect) in sub.iter().enumerate() {
+        for (rect_index, rect) in sub.rects.iter().enumerate() {
             sub_format.set_rect_index(rect_index);
             notes.push(create_note(
                 model.clone(),

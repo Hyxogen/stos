@@ -1,4 +1,3 @@
-use log::{debug, trace};
 use std::fmt;
 use std::str::FromStr;
 

@@ -85,76 +85,7 @@ impl TryFrom<subtitle::Rect<'_>> for Rect {
         match rect {
             subtitle::Rect::Text(text) => Ok(Rect::Text(text.get().to_string())),
             subtitle::Rect::Ass(ass) => Ok(Rect::Ass(ass.try_into()?)),
-            subtitle::Rect::Bitmap(bitmap) => {
-                Ok(Rect::Bitmap(bitmap_to_image(&bitmap)?))
-                /*
-                if bitmap.colors() > 256 {
-                    Err(Error::msg("unsupported bitmap format"))
-                } else {
-                    let width: usize = bitmap.width().try_into().unwrap();
-                    let height: usize = bitmap.height().try_into().unwrap();
-                    let linesize: usize = unsafe { (*bitmap.as_ptr()).linesize[0] }
-                        .try_into()
-                        .unwrap();
-                    let colors = bitmap.colors();
-                    eprintln!(
-                        "width: {}, height: {}, linesize: {}, colors: {}",
-                        width, height, linesize, colors
-                    );
-                    let pal = unsafe {
-                        std::slice::from_raw_parts(
-                            (*bitmap.as_ptr()).data[1] as *mut u32,
-                            width * height * linesize,
-                        )
-                    };
-                    let data = unsafe {
-                        std::slice::from_raw_parts(
-                            (*bitmap.as_ptr()).data[0],
-                            width * height * linesize,
-                        )
-                    };
-
-                    let mut image32 = Vec::new();
-                    for y in 0..height {
-                        for x in 0..width {
-                            let pos: usize = data[y * linesize + x].try_into().unwrap();
-                            image32.push(pal[pos]);
-                        }
-                    }
-
-                    let mut image = Vec::new();
-                    for pixel in image32 {
-                        let bytes = pixel.to_ne_bytes();
-                        let a = bytes[0];
-                        let r = bytes[1].checked_mul(a).unwrap_or(255) / 255;
-                        let g = bytes[2].checked_mul(a).unwrap_or(255) / 255;
-                        let b = bytes[3].checked_mul(a).unwrap_or(255) / 255;
-                        image.push(r);
-                        image.push(g);
-                        image.push(b);
-                        image.push(a);
-                    }
-                    /*
-                    image::RgbaImage::from_raw(
-                        width.try_into().unwrap(),
-                        height.try_into().unwrap(),
-                        image,
-                    )
-                    .unwrap()
-                    .save("test.png")
-                    .unwrap();
-                    panic!();*/
-
-                    Ok(Rect::Bitmap(
-                        RgbaImage::from_raw(
-                            width.try_into().unwrap(),
-                            height.try_into().unwrap(),
-                            image,
-                        )
-                        .unwrap(),
-                    ))
-                }*/
-            }
+            subtitle::Rect::Bitmap(bitmap) => Ok(Rect::Bitmap(bitmap_to_image(&bitmap)?)),
             _ => todo!(),
         }
     }
@@ -214,11 +145,6 @@ impl Subtitle {
                 })
             }
         }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Rect> {
-        //TODO remove
-        self.rects.iter()
     }
 
     pub fn merge(&mut self, other: Self) -> &mut Self {
