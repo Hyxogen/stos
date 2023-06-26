@@ -1,5 +1,5 @@
 extern crate ffmpeg_next as libav;
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use crossbeam_channel::unbounded;
 use genanki_rs::{Deck, Package};
 use log::{debug, error, info, trace};
@@ -57,6 +57,10 @@ fn main() -> Result<()> {
         })
         .collect::<Result<Vec<Vec<Subtitle>>>>()?;
     trace!("read all subtitles from {} file(s)", subtitles.len());
+
+    if subtitles.iter().all(|list| list.is_empty()) {
+        return Err(Error::msg("The file(s) did not contain any subtitles"));
+    }
 
     let media_files = if args.media_files.is_empty() {
         trace!("using subtitle files argument as media files");
@@ -132,22 +136,28 @@ fn main() -> Result<()> {
                     .zip(media_files.iter())
                     .enumerate()
                     .for_each(|(idx, ((sender, subs), media_file))| {
-                        let mut format = Format::new(subs.len(), file_count, image_format).unwrap();
-                        format.file_index = idx;
-                        s.spawn_fifo(move |_| {
-                            match extract_images(media_file, subs, format, sender) {
-                                Ok(_) => {
-                                    trace!("{}: Decoded all images", media_file.to_string_lossy());
+                        if !subs.is_empty() {
+                            let mut format =
+                                Format::new(subs.len(), file_count, image_format).unwrap();
+                            format.file_index = idx;
+                            s.spawn_fifo(move |_| {
+                                match extract_images(media_file, subs, format, sender) {
+                                    Ok(_) => {
+                                        trace!(
+                                            "{}: Decoded all images",
+                                            media_file.to_string_lossy()
+                                        );
+                                    }
+                                    Err(err) => {
+                                        error!(
+                                            "{}: Failed to decode images: {:?}",
+                                            media_file.to_string_lossy(),
+                                            err
+                                        );
+                                    }
                                 }
-                                Err(err) => {
-                                    error!(
-                                        "{}: Failed to decode images: {:?}",
-                                        media_file.to_string_lossy(),
-                                        err
-                                    );
-                                }
-                            }
-                        });
+                            });
+                        }
                     });
             }
         });

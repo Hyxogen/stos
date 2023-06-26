@@ -107,8 +107,13 @@ pub fn create_all_notes(
     let mut notes = Vec::new();
     let mut media = Vec::new();
 
-    trace!("converting {} files to notes", files.len());
+    trace!("converting {} file(s) to notes", files.len());
     for (file_idx, subs) in files.iter().enumerate() {
+        if subs.is_empty() {
+            trace!("skipping a subtitle list since it contained no subtitles");
+            continue;
+        }
+
         let sub_format = Format::new(subs.len(), files.len(), sub_format)?;
         let image_format = if let Some(format) = image_format {
             Some(Format::new(subs.len(), files.len(), format)?)

@@ -56,6 +56,10 @@ pub fn generate_audio_commands(
     let mut commands = Vec::new();
 
     for (file_index, (audio_file, subtitles)) in audio_files.iter().zip(subtitles).enumerate() {
+        if subtitles.is_empty() {
+            continue;
+        }
+
         let mut format = Format::new(subtitles.len(), audio_files.len(), format)?;
         format.file_index = file_index;
         commands.push(

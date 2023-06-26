@@ -82,10 +82,7 @@ impl FromStr for DialogueEvent {
         let mut parts = s.splitn(9, ',').skip(3);
 
         let name = parts.next().ok_or(AssError::NotEnoughParts)?.to_string();
-        let text = parts
-            .nth(4)
-            .ok_or(AssError::NotEnoughParts)?
-            .parse()?;
+        let text = parts.nth(4).ok_or(AssError::NotEnoughParts)?.parse()?;
         Ok(Self { name, text })
     }
 }
