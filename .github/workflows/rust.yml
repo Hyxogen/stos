@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Prepare
-      run: sudo apt install -y ffmpeg
+      run: sudo apt install -y libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
