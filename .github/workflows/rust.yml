@@ -28,7 +28,11 @@ jobs:
       - name: Install pacakges (windows)
         if: matrix.os == 'windows-latest'
         run: choco install ffmpeg
-      - name: Build
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
         run: $env:FFMPEG_DIR = 'C:\ProgramData\chocolatey\lib\ffmpeg'; cargo build --verbose
+      - name: Build (Unix)
+        if: matrix.os != 'windows-latest'
+        run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
