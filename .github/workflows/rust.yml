@@ -27,10 +27,14 @@ jobs:
         run: brew install ffmpeg pkg-config
       - name: Install pacakges (windows)
         if: matrix.os == 'windows-latest'
-        run: choco install ffmpeg
+        run: |
+          wget -Uri https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z -OutFile ffmpeg.7z
+          7z x ffmpeg.7z
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
-        run: $env:FFMPEG_DIR = 'C:\ProgramData\chocolatey\lib\ffmpeg'; cargo build --verbose
+        run: |
+          $env:FFMPEG_DIR = "$(Get-Location)\ffmpeg-6.0-full_build-shared"; cargo build --verbose
+          cp "$(Get-Location)\ffmpeg-6.0-full_build-shared\bin\*" 'target\debug\' 
       - name: Build (Unix)
         if: matrix.os != 'windows-latest'
         run: cargo build --verbose
