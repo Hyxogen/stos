@@ -31,8 +31,7 @@ pub struct Args {
     pub verbosity: LevelFilter,
 }
 
-impl Default for Args {
-    fn default() -> Self {
+impl Default for Args { fn default() -> Self {
         Self {
             executable: "ffmpeg".to_string(),
             sub_files: Default::default(),
@@ -110,6 +109,9 @@ impl Args {
                 }
                 Short('c') | Long("coalesce") => {
                     args.coalesce = true;
+                }
+                Short('o') | Long("output") => {
+                    args.package = parser.value()?.into();
                 }
                 Short('v') => {
                     args.verbosity = LevelFilter::Warn;

@@ -1,6 +1,7 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::process::Command;
+use tempfile::*;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -81,5 +82,20 @@ fn no_subtitle_at_index() -> TestResult {
         .assert()
         .failure()
         .stderr(predicate::str::contains("does not have a 2 streams"));
+    Ok(())
+}
+
+#[test]
+fn subs_only() -> TestResult {
+    let dir = tempdir()?;
+    let mut file = dir.path().to_path_buf();
+    file.push("deck.apkg");
+    Command::cargo_bin("stos")?
+        .arg("tests/media/sub.srt")
+        .arg("-o")
+        .arg(&file)
+        .assert()
+        .success();
+    assert!(file.exists());
     Ok(())
 }

@@ -1310,6 +1310,7 @@ dependencies = [
  "pretty_env_logger",
  "rand",
  "rayon",
+ "tempfile",
 ]
 
 [[package]]
