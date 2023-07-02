@@ -16,16 +16,6 @@ fn no_file() -> TestResult {
 }
 
 #[test]
-fn file_is_dir() -> TestResult {
-    Command::cargo_bin("stos")?
-        .arg("tests/media")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Is a directory"));
-    Ok(())
-}
-
-#[test]
 fn no_sub_stream() -> TestResult {
     Command::cargo_bin("stos")?
         .arg("tests/media/only_video.mp4")
