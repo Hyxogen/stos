@@ -4,7 +4,7 @@ use crate::util::get_stream;
 use crate::util::Timestamp;
 use anyhow::{Context, Error, Result};
 use crossbeam_channel::{Receiver, Sender};
-use image::{DynamicImage, RgbImage};
+pub use image::{DynamicImage, ImageBuffer, RgbImage, Rgba};
 use libav::{media, software::scaling, util::frame};
 use log::{debug, trace, warn};
 use std::path::PathBuf;

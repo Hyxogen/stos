@@ -1,9 +1,11 @@
 extern crate ffmpeg_next as libav;
 use anyhow::{Context, Error, Result};
-use crossbeam_channel::unbounded;
+use crossbeam_channel::{unbounded, Sender};
 use genanki_rs::{Deck, Package};
 use log::{debug, error, info, trace};
-use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
+use std::path::PathBuf;
+use std::process;
 
 mod anki;
 mod args;
@@ -20,6 +22,57 @@ use args::Args;
 use audio::generate_audio_commands;
 use format::Format;
 use subtitle::{merge_overlapping, read_subtitles, Rect, Subtitle};
+
+enum Job<'a> {
+    Command(std::process::Command),
+    WriteImage {
+        path: PathBuf,
+        image: &'a image::ImageBuffer<Rgba<u8>, Vec<u8>>,
+    },
+    DecodeVideo {
+        file: PathBuf,
+        format: Format<'a>,
+        subs: Vec<Subtitle>,
+        sender: Sender<(String, image::DynamicImage)>,
+    },
+}
+
+impl<'a> From<process::Command> for Job<'a> {
+    fn from(c: process::Command) -> Self {
+        Self::Command(c)
+    }
+}
+
+impl<'a> Job<'a> {
+    pub fn execute(self) -> Result<()> {
+        match self {
+            Job::Command(command) => Self::execute_command(command),
+            Job::WriteImage { path, image } => {
+                image
+                    .save(&path)
+                    .with_context(|| format!("{}: Failed to save image", path.to_string_lossy()))?;
+                Ok(())
+            }
+            Job::DecodeVideo {
+                file,
+                format,
+                subs,
+                sender,
+            } => extract_images(&file, &subs, format, sender),
+        }
+    }
+
+    fn execute_command(mut command: process::Command) -> Result<()> {
+        match command
+            .status()
+            .context("Failed to execute command")?
+            .success()
+        {
+            true => Ok(()),
+            false => Err(Error::msg("FFmpeg exited with an error")),
+        }
+    }
+}
 
 fn main() -> Result<()> {
     let args = Args::parse_from_env()?;
@@ -64,105 +117,91 @@ fn main() -> Result<()> {
         &args.media_files
     };
 
-    let mut commands = if args.gen_audio {
+    let mut jobs: Vec<Job> = if args.gen_audio {
+        trace!("generating FFmpeg commands to extract audio");
         generate_audio_commands(
             media_files,
             &subtitles,
             args.audio_stream,
             &args.audio_format,
         )?
+        .into_iter()
+        .map(Into::into)
+        .collect()
     } else {
+        trace!("not extracting audio");
         Default::default()
     };
 
-    if !args.no_media {
-        let image_format = &args.image_format;
-        ThreadPoolBuilder::new()
-            .build()
-            .unwrap()
-            .scope_fifo(|s| -> Result<()> {
-                let (sender, receiver) = unbounded();
-                for command in commands.iter_mut() {
-                    s.spawn_fifo(|_| match command.status() {
-                        Ok(exitcode) => {
-                            if exitcode.success() {
-                                trace!("a FFmpeg command exited successfully");
-                            } else {
-                                error!("a FFmpeg command exited with an error");
-                            }
-                        }
-                        Err(err) => {
-                            error!("failed to spawn command: {}", err);
-                        }
+    for (file_idx, list) in subtitles.iter().enumerate() {
+        let mut format = Format::new(list.len(), subtitles.len(), &args.sub_format).unwrap();
+        format.file_index = file_idx;
+        for (sub_idx, sub) in list.iter().enumerate() {
+            format.sub_index = sub_idx;
+            for (rect_idx, rect) in sub.rects.iter().enumerate() {
+                format.set_rect_count(sub.rects.len()).unwrap();
+                format.rect_index = rect_idx;
+                if let Rect::Bitmap(image) = rect {
+                    jobs.push(Job::WriteImage {
+                        path: format.to_string().into(),
+                        image,
                     });
                 }
-                std::iter::repeat(receiver).take(4).for_each(|receiver| {
-                    s.spawn_fifo(|_| match write_images(receiver) {
-                        Ok(_) => {
-                            trace!("converted images");
-                        }
-                        Err(err) => {
-                            error!("failed  to convert images: {}", err);
-                        }
-                    });
-                });
+            }
+        }
+    }
 
-                for (file_idx, list) in subtitles.iter().enumerate() {
-                    for (sub_idx, sub) in list.iter().enumerate() {
-                        for (rect_idx, rect) in sub.rects.iter().enumerate() {
-                            let mut format =
-                                Format::new(list.len(), subtitles.len(), &args.sub_format).unwrap();
-                            format.set_rect_count(sub.rects.len()).unwrap();
-                            format.file_index = file_idx;
-                            format.sub_index = sub_idx;
-                            format.rect_index = rect_idx;
-                            if let Rect::Bitmap(image) = rect {
-                                sender
-                                    .send((format.to_string(), image.clone().into()))
-                                    .unwrap();
-                            }
-                        }
+    let (sender, receiver) = unbounded();
+    let media_file_count = media_files.len();
+
+    if args.gen_image {
+        trace!("generating jobs to extract images");
+        jobs.extend(
+            std::iter::repeat(sender)
+                .zip(subtitles.clone())
+                .zip(media_files.clone())
+                .enumerate()
+                .map(|(idx, ((sender, subs), file))| {
+                    let mut format =
+                        Format::new(subs.len(), media_file_count, &args.image_format).unwrap();
+                    format.file_index = idx;
+                    Job::DecodeVideo {
+                        file,
+                        subs,
+                        format,
+                        sender,
                     }
-                }
+                }),
+        );
+    } else {
+        drop(sender);
+        trace!("not extracting images");
+    }
 
-                if args.gen_image {
-                    let file_count = media_files.len();
+    trace!("will execute {} jobs in parallel", jobs.len());
 
-                    std::iter::repeat(sender)
-                        .take(8)
-                        .zip(subtitles.iter())
-                        .zip(media_files.iter())
-                        .enumerate()
-                        .for_each(|(idx, ((sender, subs), media_file))| {
-                            if !subs.is_empty() {
-                                let mut format =
-                                    Format::new(subs.len(), file_count, image_format).unwrap();
-                                format.file_index = idx;
-                                s.spawn_fifo(move |_| {
-                                    match extract_images(media_file, subs, format, sender) {
-                                        Ok(_) => {
-                                            trace!(
-                                                "{}: Decoded all images",
-                                                media_file.to_string_lossy()
-                                            );
-                                        }
-                                        Err(err) => {
-                                            error!(
-                                                "{}: Failed to decode images: {:?}",
-                                                media_file.to_string_lossy(),
-                                                err
-                                            );
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                }
-                Ok(())
-            })?;
+    if !args.no_media {
+        std::thread::scope(|s| -> Result<()> {
+            std::iter::repeat(receiver).take(12).for_each(|receiver| {
+                s.spawn(|| match write_images(receiver) {
+                    Ok(_) => {
+                        trace!("converted images");
+                    }
+                    Err(err) => {
+                        error!("failed to convert images: {:?}", err);
+                    }
+                });
+            });
+
+            jobs.into_par_iter()
+                .map(Job::execute)
+                .collect::<Result<Vec<_>>>()?;
+            Ok(())
+        })?;
     } else {
         debug!("did not output any media files because \"--no-media\" was specified");
     }
+    trace!("executed all jobs");
 
     let (notes, media) = create_all_notes(
         &subtitles,
