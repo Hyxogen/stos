@@ -51,6 +51,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
           $env:FFMPEG_DIR = "$(Get-Location)\ffmpeg-6.0-full_build-shared"; cargo build --verbose
+          cp "$(Get-Location)\ffmpeg-6.0-full_build-shared\bin\*" 'target\debug\' 
       - name: Build (Unix)
         if: matrix.os != 'windows-latest'
         run: cargo build --verbose
@@ -60,5 +61,5 @@ jobs:
       - name: Run tests (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          cp "$(Get-Location)\ffmpeg-6.0-full_build-shared\bin\*" 'target\debug\' 
+          $env:FFMPEG_DIR = "$(Get-Location)\ffmpeg-6.0-full_build-shared"; cargo build --verbose
           cargo test --verbose
