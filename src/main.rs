@@ -32,11 +32,6 @@ fn main() -> Result<()> {
     libav::init().context("Failed to initialize libav")?;
     trace!("initialized libav");
 
-    if args.sub_files.is_empty() {
-        eprintln!("Usage: {} [OPTIONS] SUBTITLE_FILE...", args.executable);
-        std::process::exit(0);
-    }
-
     let subtitles = args
         .sub_files
         .iter()
@@ -82,85 +77,89 @@ fn main() -> Result<()> {
 
     if !args.no_media {
         let image_format = &args.image_format;
-        ThreadPoolBuilder::new().build().unwrap().scope_fifo(|s| {
-            let (sender, receiver) = unbounded();
-            for command in commands.iter_mut() {
-                s.spawn_fifo(|_| match command.status() {
-                    Ok(exitcode) => {
-                        if exitcode.success() {
-                            trace!("a FFmpeg command exited successfully");
-                        } else {
-                            error!("a FFmpeg command exited with an error");
+        ThreadPoolBuilder::new()
+            .build()
+            .unwrap()
+            .scope_fifo(|s| -> Result<()> {
+                let (sender, receiver) = unbounded();
+                for command in commands.iter_mut() {
+                    s.spawn_fifo(|_| match command.status() {
+                        Ok(exitcode) => {
+                            if exitcode.success() {
+                                trace!("a FFmpeg command exited successfully");
+                            } else {
+                                error!("a FFmpeg command exited with an error");
+                            }
                         }
-                    }
-                    Err(err) => {
-                        error!("failed to spawn command: {}", err);
-                    }
+                        Err(err) => {
+                            error!("failed to spawn command: {}", err);
+                        }
+                    });
+                }
+                std::iter::repeat(receiver).take(4).for_each(|receiver| {
+                    s.spawn_fifo(|_| match write_images(receiver) {
+                        Ok(_) => {
+                            trace!("converted images");
+                        }
+                        Err(err) => {
+                            error!("failed  to convert images: {}", err);
+                        }
+                    });
                 });
-            }
-            std::iter::repeat(receiver).take(4).for_each(|receiver| {
-                s.spawn_fifo(|_| match write_images(receiver) {
-                    Ok(_) => {
-                        trace!("converted images");
-                    }
-                    Err(err) => {
-                        error!("failed  to convert images: {}", err);
-                    }
-                });
-            });
 
-            for (file_idx, list) in subtitles.iter().enumerate() {
-                for (sub_idx, sub) in list.iter().enumerate() {
-                    for (rect_idx, rect) in sub.rects.iter().enumerate() {
-                        let mut format =
-                            Format::new(list.len(), subtitles.len(), &args.sub_format).unwrap();
-                        format.set_rect_count(sub.rects.len()).unwrap();
-                        format.file_index = file_idx;
-                        format.sub_index = sub_idx;
-                        format.rect_index = rect_idx;
-                        if let Rect::Bitmap(image) = rect {
-                            sender
-                                .send((format.to_string(), image.clone().into()))
-                                .unwrap();
+                for (file_idx, list) in subtitles.iter().enumerate() {
+                    for (sub_idx, sub) in list.iter().enumerate() {
+                        for (rect_idx, rect) in sub.rects.iter().enumerate() {
+                            let mut format =
+                                Format::new(list.len(), subtitles.len(), &args.sub_format).unwrap();
+                            format.set_rect_count(sub.rects.len()).unwrap();
+                            format.file_index = file_idx;
+                            format.sub_index = sub_idx;
+                            format.rect_index = rect_idx;
+                            if let Rect::Bitmap(image) = rect {
+                                sender
+                                    .send((format.to_string(), image.clone().into()))
+                                    .unwrap();
+                            }
                         }
                     }
                 }
-            }
 
-            if args.gen_image {
-                let file_count = media_files.len();
+                if args.gen_image {
+                    let file_count = media_files.len();
 
-                std::iter::repeat(sender)
-                    .take(8)
-                    .zip(subtitles.iter())
-                    .zip(media_files.iter())
-                    .enumerate()
-                    .for_each(|(idx, ((sender, subs), media_file))| {
-                        if !subs.is_empty() {
-                            let mut format =
-                                Format::new(subs.len(), file_count, image_format).unwrap();
-                            format.file_index = idx;
-                            s.spawn_fifo(move |_| {
-                                match extract_images(media_file, subs, format, sender) {
-                                    Ok(_) => {
-                                        trace!(
-                                            "{}: Decoded all images",
-                                            media_file.to_string_lossy()
-                                        );
+                    std::iter::repeat(sender)
+                        .take(8)
+                        .zip(subtitles.iter())
+                        .zip(media_files.iter())
+                        .enumerate()
+                        .for_each(|(idx, ((sender, subs), media_file))| {
+                            if !subs.is_empty() {
+                                let mut format =
+                                    Format::new(subs.len(), file_count, image_format).unwrap();
+                                format.file_index = idx;
+                                s.spawn_fifo(move |_| {
+                                    match extract_images(media_file, subs, format, sender) {
+                                        Ok(_) => {
+                                            trace!(
+                                                "{}: Decoded all images",
+                                                media_file.to_string_lossy()
+                                            );
+                                        }
+                                        Err(err) => {
+                                            error!(
+                                                "{}: Failed to decode images: {:?}",
+                                                media_file.to_string_lossy(),
+                                                err
+                                            );
+                                        }
                                     }
-                                    Err(err) => {
-                                        error!(
-                                            "{}: Failed to decode images: {:?}",
-                                            media_file.to_string_lossy(),
-                                            err
-                                        );
-                                    }
-                                }
-                            });
-                        }
-                    });
-            }
-        });
+                                });
+                            }
+                        });
+                }
+                Ok(())
+            })?;
     } else {
         debug!("did not output any media files because \"--no-media\" was specified");
     }
