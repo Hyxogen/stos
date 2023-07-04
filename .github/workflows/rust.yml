@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - run: sudo apt install -y libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev
       - run: rustup update stable && rustup default stable
       - run: rustup component add clippy
       - run: cargo clippy -- -D warnings
