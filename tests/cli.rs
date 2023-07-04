@@ -89,3 +89,21 @@ fn subs_only() -> TestResult {
     assert!(file.exists());
     Ok(())
 }
+
+#[test]
+fn subs_and_video() -> TestResult {
+    let dir = tempdir()?;
+    let mut file = dir.path().to_path_buf();
+    file.push("image_0_0.jpg");
+    Command::cargo_bin("stos")?
+        .arg("tests/media/sub.srt")
+        .arg("-i")
+        .arg("-m")
+        .arg("tests/media/only_video.mp4")
+        .arg("--image-format")
+        .arg(format!("{}/image_%f_%s.jpg", dir.path().to_string_lossy()))
+        .assert()
+        .success();
+    assert!(file.exists());
+    Ok(())
+}
