@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: sudo apt install -y libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev
+      - run: sudo apt update && sudo apt install -y libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev
       - run: rustup update stable && rustup default stable
       - run: rustup component add clippy
       - run: cargo clippy -- -D warnings
@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v3
       - name: Install packages (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt install -y libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev
+        run: sudo apt update && sudo apt install -y libavutil-dev libavformat-dev libavfilter-dev libavdevice-dev
       - name: Install pacakges (macOs)
         if: matrix.os == 'macos-latest'
         run: brew install ffmpeg pkg-config
