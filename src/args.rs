@@ -1,6 +1,7 @@
 use anyhow::{Context, Error, Result};
 use log::LevelFilter;
 use rand::random;
+use regex::Regex;
 use std::path::PathBuf;
 
 const DEFAULT_DECK_FILE: &str = "deck.apkg";
@@ -38,6 +39,8 @@ fn print_help(executable: &str) {
     println!("    --image-format=FORMAT         Specify how the image files should be named [default: {}].", DEFAULT_IMAGE_FORMAT);
     println!("    -m, --media                   Specify media files from which to generate the audio snippets (-a) or images (-i).");
     println!("    -c, --coalesce                Merge overlapping audio snippets to one");
+    println!("    -b, --blacklist               Do not include subtitles that match this regex (can be used multiple times)");
+    println!("    -w, --whitelist               Only include subtitles that match this regex (can be used multiple times)");
     println!("    --no-deck                     Do not write a anki deck package");
     println!(
         "    --name=NAME                   Specify the name to give the anki deck [default: {}]",
@@ -53,6 +56,8 @@ pub struct Args {
     pub sub_format: String,
 
     pub coalesce: bool,
+    pub blacklist: Vec<Regex>,
+    pub whitelist: Vec<Regex>,
 
     pub media_files: Vec<PathBuf>,
 
@@ -82,6 +87,8 @@ impl Default for Args {
             sub_stream: Default::default(),
             sub_format: "sub_%f_%s_%r.jpg".to_string(),
             coalesce: false,
+            blacklist: Default::default(),
+            whitelist: Default::default(),
             media_files: Default::default(),
             gen_audio: false,
             audio_stream: Default::default(),
@@ -167,6 +174,24 @@ impl Args {
                 }
                 Short('c') | Long("coalesce") => {
                     args.coalesce = true;
+                }
+                Short('b') | Long("blacklist") => {
+                    if let Ok(re) = parser.value()?.into_string() {
+                        args.blacklist.push(
+                            Regex::new(&re).context("Failed to compile regex for blacklist")?,
+                        );
+                    } else {
+                        eprintln!("Failed to parse \"-b, --blacklist\" option: Invalid unicode");
+                    }
+                }
+                Short('w') | Long("whitelist") => {
+                    if let Ok(re) = parser.value()?.into_string() {
+                        args.whitelist.push(
+                            Regex::new(&re).context("Failed to compile regex for whitelist")?,
+                        );
+                    } else {
+                        eprintln!("Failed to parse \"-w, --whitelist\" option: Invalid unicode");
+                    }
                 }
                 Short('o') | Long("output") => {
                     args.package = parser.value()?.into();

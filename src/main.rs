@@ -74,6 +74,81 @@ impl<'a> Job<'a> {
     }
 }
 
+fn filter_subs(subtitles: Vec<Vec<Subtitle>>, args: &Args) -> Vec<Vec<Subtitle>> {
+    subtitles
+        .into_iter()
+        .map(|subs| {
+            if !args.whitelist.is_empty() {
+                subs.into_iter()
+                    .map(|sub| {
+                        let rects = sub
+                            .rects
+                            .into_iter()
+                            .filter(|rect| match rect {
+                                Rect::Text(text) => {
+                                    args.whitelist.iter().any(|re| re.is_match(text))
+                                }
+                                Rect::Ass(ass) => args
+                                    .whitelist
+                                    .iter()
+                                    .any(|re| re.is_match(&ass.text.dialogue)),
+                                _ => true,
+                            })
+                            .collect();
+
+                        Subtitle {
+                            rects,
+                            start: sub.start,
+                            end: sub.end,
+                        }
+                    })
+                    .filter(|sub| !sub.rects.is_empty())
+                    .collect()
+            } else {
+                subs
+            }
+        })
+        .map(|subs| {
+            if !args.blacklist.is_empty() {
+                subs.into_iter()
+                    .map(|sub| {
+                        let rects = sub
+                            .rects
+                            .into_iter()
+                            .filter(|rect| match rect {
+                                Rect::Text(text) => {
+                                    args.blacklist.iter().any(|re| !re.is_match(text))
+                                }
+                                Rect::Ass(ass) => args
+                                    .blacklist
+                                    .iter()
+                                    .any(|re| !re.is_match(&ass.text.dialogue)),
+                                _ => true,
+                            })
+                            .collect();
+
+                        Subtitle {
+                            rects,
+                            start: sub.start,
+                            end: sub.end,
+                        }
+                    })
+                    .filter(|sub| !sub.rects.is_empty())
+                    .collect()
+            } else {
+                subs
+            }
+        })
+        .map(|subs| {
+            if args.coalesce {
+                merge_overlapping(subs)
+            } else {
+                subs
+            }
+        })
+        .collect()
+}
+
 fn main() -> Result<()> {
     let args = Args::parse_from_env()?;
 
@@ -88,26 +163,20 @@ fn main() -> Result<()> {
     let subtitles = args
         .sub_files
         .iter()
-        .map(|file| match read_subtitles(file, args.sub_stream) {
-            Ok(subs) if args.coalesce => {
-                let before = subs.len();
-                let subs = merge_overlapping(subs);
-                debug!(
-                    "{}: Coalesced {} subs into {}",
-                    file.to_string_lossy(),
-                    before,
-                    subs.len()
-                );
-                Ok(subs)
-            }
-            Ok(subs) => Ok(subs),
-            Err(err) => Err(err),
-        })
+        .map(|file| read_subtitles(file, args.sub_stream))
         .collect::<Result<Vec<Vec<Subtitle>>>>()?;
     trace!("read all subtitles from {} file(s)", subtitles.len());
 
     if subtitles.iter().all(|list| list.is_empty()) {
         return Err(Error::msg("The file(s) did not contain any subtitles"));
+    }
+
+    let subtitles = filter_subs(subtitles, &args);
+
+    if subtitles.iter().all(|list| list.is_empty()) {
+        return Err(Error::msg(
+            "None of the subtitles matched the whitelist and/or all subtitles were blacklisted",
+        ));
     }
 
     let media_files = if args.media_files.is_empty() {
