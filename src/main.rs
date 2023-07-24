@@ -140,6 +140,11 @@ fn filter_subs(subtitles: Vec<Vec<Subtitle>>, args: &Args) -> Vec<Vec<Subtitle>>
             }
         })
         .map(|subs| {
+            subs.into_iter()
+                .filter(|sub| sub.start >= args.start && sub.end <= args.end)
+                .collect()
+        })
+        .map(|subs| {
             if args.coalesce {
                 merge_overlapping(subs)
             } else {
@@ -192,6 +197,7 @@ fn main() -> Result<()> {
             media_files,
             &subtitles,
             args.audio_stream,
+            (args.pad_begin, args.pad_end),
             &args.audio_format,
         )?
         .into_iter()

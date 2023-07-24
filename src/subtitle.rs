@@ -1,5 +1,5 @@
 use crate::ass::DialogueEvent;
-use crate::util::{get_stream, Timestamp};
+use crate::util::{get_stream, Duration, Timestamp};
 use anyhow::{Context, Error, Result};
 use image::RgbaImage;
 use libav::util::rational::Rational;
@@ -112,10 +112,10 @@ impl Subtitle {
 
         let start = Timestamp::from_timebase(start, time_base)
             .context("Failed to convert start timestamp")?
-            + Timestamp::from_ms(sub.start());
+            + Duration::from_ms(sub.start());
         let end = Timestamp::from_timebase(end, time_base)
             .context("Failed to convert end timestamp")?
-            + Timestamp::from_ms(sub.end());
+            + Duration::from_ms(sub.end());
 
         if start == end {
             Err(Error::msg("Subtitle is of zero length"))
@@ -150,7 +150,13 @@ impl Subtitle {
     pub fn merge(&mut self, other: Self) -> &mut Self {
         self.start = self.start.min(other.start);
         self.end = self.end.min(other.end);
-        self.rects.extend(other.rects);
+
+        for rect in other.rects {
+            if !self.rects.contains(&rect) {
+                self.rects.push(rect);
+            }
+        }
+
         self
     }
 
@@ -262,13 +268,13 @@ mod tests {
     #[test]
     fn no_overlap() {
         let a = Subtitle {
-            start: Timestamp(100),
-            end: Timestamp(1000),
+            start: Timestamp::from_ms(100),
+            end: Timestamp::from_ms(1000),
             rects: Default::default(),
         };
         let b = Subtitle {
-            start: Timestamp(5000),
-            end: Timestamp(5100),
+            start: Timestamp::from_ms(5000),
+            end: Timestamp::from_ms(5100),
             rects: Default::default(),
         };
         assert_eq!(a.overlaps(&b), false);
@@ -278,13 +284,13 @@ mod tests {
     #[test]
     fn partial_overlap() {
         let a = Subtitle {
-            start: Timestamp(100),
-            end: Timestamp(1000),
+            start: Timestamp::from_ms(100),
+            end: Timestamp::from_ms(1000),
             rects: Default::default(),
         };
         let b = Subtitle {
-            start: Timestamp(500),
-            end: Timestamp(5000),
+            start: Timestamp::from_ms(500),
+            end: Timestamp::from_ms(5000),
             rects: Default::default(),
         };
         assert_eq!(a.overlaps(&b), true);
@@ -294,13 +300,13 @@ mod tests {
     #[test]
     fn exact_overlap() {
         let a = Subtitle {
-            start: Timestamp(100),
-            end: Timestamp(1000),
+            start: Timestamp::from_ms(100),
+            end: Timestamp::from_ms(1000),
             rects: Default::default(),
         };
         let b = Subtitle {
-            start: Timestamp(100),
-            end: Timestamp(1000),
+            start: Timestamp::from_ms(100),
+            end: Timestamp::from_ms(1000),
             rects: Default::default(),
         };
         assert_eq!(a.overlaps(&b), true);
@@ -310,13 +316,13 @@ mod tests {
     #[test]
     fn complete_overlap() {
         let a = Subtitle {
-            start: Timestamp(200),
-            end: Timestamp(900),
+            start: Timestamp::from_ms(200),
+            end: Timestamp::from_ms(900),
             rects: Default::default(),
         };
         let b = Subtitle {
-            start: Timestamp(100),
-            end: Timestamp(1000),
+            start: Timestamp::from_ms(100),
+            end: Timestamp::from_ms(1000),
             rects: Default::default(),
         };
         assert_eq!(a.overlaps(&b), true);

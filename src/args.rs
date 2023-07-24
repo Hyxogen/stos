@@ -1,3 +1,4 @@
+use crate::util::{Duration, Timestamp};
 use anyhow::{Context, Error, Result};
 use log::LevelFilter;
 use rand::random;
@@ -55,7 +56,12 @@ pub struct Args {
     pub sub_stream: Option<usize>,
     pub sub_format: String,
 
+    pub start: Timestamp,
+    pub end: Timestamp,
+
     pub coalesce: bool,
+    pub pad_begin: Duration,
+    pub pad_end: Duration,
     pub blacklist: Vec<Regex>,
     pub whitelist: Vec<Regex>,
 
@@ -86,7 +92,11 @@ impl Default for Args {
             sub_files: Default::default(),
             sub_stream: Default::default(),
             sub_format: "sub_%f_%s_%r.jpg".to_string(),
+            start: Timestamp::MIN,
+            end: Timestamp::MAX,
             coalesce: false,
+            pad_begin: Default::default(),
+            pad_end: Default::default(),
             blacklist: Default::default(),
             whitelist: Default::default(),
             media_files: Default::default(),
@@ -126,6 +136,21 @@ impl Args {
                 }
                 Short('s') | Long("sub-stream") => {
                     args.sub_stream = Some(parser.value()?.parse()?);
+                }
+                Long("start") => {
+                    args.start = if let Ok(start) = parser.value()?.into_string() {
+                        start.parse()?
+                    } else {
+                        std::process::exit(1);
+                    }
+                }
+                Long("end") => {
+                    args.end = if let Ok(end) = parser.value()?.into_string() {
+                        end.parse()?
+                    } else {
+                        std::process::exit(1);
+                    }
+
                 }
                 Short('a') | Long("audio") => {
                     args.gen_audio = true;
@@ -175,6 +200,24 @@ impl Args {
                 Short('c') | Long("coalesce") => {
                     args.coalesce = true;
                 }
+                Long("pad-begin") => {
+                    args.pad_begin =
+                        Duration::from_ms(if let Ok(pad) = parser.value()?.into_string() {
+                            pad.parse().context("--pad-begin is not a valid number")?
+                        } else {
+                            eprintln!("Failed to parse \"--pad-begin\" option: Invalid unicode");
+                            std::process::exit(1);
+                        })
+                }
+                Long("pad-end") => {
+                    args.pad_end =
+                        Duration::from_ms(if let Ok(pad) = parser.value()?.into_string() {
+                            pad.parse().context("--pad-end is not a valid number")?
+                        } else {
+                            eprintln!("Failed to parse \"--pad-end\" option: Invalid unicode");
+                            std::process::exit(1);
+                        })
+                }
                 Short('b') | Long("blacklist") => {
                     if let Ok(re) = parser.value()?.into_string() {
                         args.blacklist.push(
@@ -182,6 +225,7 @@ impl Args {
                         );
                     } else {
                         eprintln!("Failed to parse \"-b, --blacklist\" option: Invalid unicode");
+                        std::process::exit(1);
                     }
                 }
                 Short('w') | Long("whitelist") => {
@@ -191,6 +235,7 @@ impl Args {
                         );
                     } else {
                         eprintln!("Failed to parse \"-w, --whitelist\" option: Invalid unicode");
+                        std::process::exit(1);
                     }
                 }
                 Short('o') | Long("output") => {

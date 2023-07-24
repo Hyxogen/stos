@@ -3,18 +3,41 @@ use libav::mathematics::rescale::Rescale;
 use libav::media;
 use libav::util::rational::Rational;
 use std::fmt;
-use std::ops::Add;
+use std::ops::{Add, Sub};
+use std::str::FromStr;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Timestamp(pub i64);
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Default)]
+pub struct Timestamp(i64);
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Default)]
+pub struct Duration(i64);
+
+impl Duration {
+    pub const fn from_ms(ms: u32) -> Self {
+        Self(ms as i64 * 1000000)
+    }
+
+    pub const fn as_nanos(self) -> i64 {
+        self.0
+    }
+}
 
 impl Timestamp {
+    pub const MIN: Timestamp = Self(0);
+    pub const MAX: Timestamp = Self(i64::MAX);
+    const TIMEBASE: Rational = Rational(1, 1000000000);
+
+    #[cfg(test)]
     pub const fn from_ms(ms: u32) -> Self {
-        Self(ms as i64)
+        Self(ms as i64 * 1000000)
+    }
+
+    pub const fn from_secs(ms: u32) -> Self {
+        Self(ms as i64 * 1000000000)
     }
 
     pub fn from_timebase(ts: i64, time_base: Rational) -> Result<Self> {
-        let ts = ts.rescale(time_base, Self::time_base());
+        let ts = ts.rescale(time_base, Self::TIMEBASE);
 
         if ts < 0 {
             Err(Error::msg("Timestamp is negative"))
@@ -23,14 +46,34 @@ impl Timestamp {
         }
     }
 
-    pub const fn time_base() -> Rational {
-        Rational(1, 1000000000)
+    pub fn checked_add(&self, duration: Duration) -> Option<Timestamp> {
+        if let Some(val) = self.0.checked_add(duration.as_nanos()) {
+            if val >= 0 {
+                Some(Self(val))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn checked_sub(&self, duration: Duration) -> Option<Timestamp> {
+        if let Some(val) = self.0.checked_sub(duration.as_nanos()) {
+            if val >= 0 {
+                Some(Self(val))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ts = self.0.rescale(Self::time_base(), Rational::new(1, 1000000));
+        let ts = self.0.rescale(Self::TIMEBASE, Rational::new(1, 1000000));
         write!(
             f,
             "{}:{:02}:{:02}.{:03}",
@@ -42,11 +85,43 @@ impl fmt::Display for Timestamp {
     }
 }
 
-impl Add for Timestamp {
+impl Add<Duration> for Timestamp {
     type Output = Self;
 
-    fn add(self, other: Self) -> Self {
-        Self(self.0 + other.0)
+    fn add(self, duration: Duration) -> Self {
+        Self(self.0 + duration.as_nanos())
+    }
+}
+
+impl Sub<Duration> for Timestamp {
+    type Output = Self;
+
+    fn sub(self, duration: Duration) -> Self {
+        Self(self.0 - duration.as_nanos())
+    }
+}
+
+impl FromStr for Timestamp {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let parts: Vec<&str> = s.split(':').collect();
+
+        match parts[..] {
+            [secs] => Ok(Timestamp::from_secs(secs.parse()?)),
+            [mins, secs] => {
+                let mins: u8 = mins.parse()?;
+                let secs: u8 = secs.parse()?;
+                Ok(Timestamp::from_secs(mins as u32 * 60 + secs as u32))
+            },
+            [hours, mins, secs] => {
+                let hours: u8 = hours.parse()?;
+                let mins: u8 = mins.parse()?;
+                let secs: u8 = secs.parse()?;//TODO better errors
+                Ok(Timestamp::from_secs(60 * (hours as u32 * 60 + mins as u32) + secs as  u32))
+            },
+            _ => Err(Error::msg("invalid timestamp"))
+        }
     }
 }
 
