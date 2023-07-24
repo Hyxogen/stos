@@ -1,18 +1,62 @@
 use crate::ass::DialogueEvent;
-use crate::util::{get_stream, Duration, Timestamp};
+use crate::time::{Duration, Timestamp};
 use anyhow::{Context, Error, Result};
 use image::RgbaImage;
 use libav::util::rational::Rational;
-use libav::{codec, codec::packet, codec::subtitle, decoder, media};
+use libav::{codec, codec::packet, codec::subtitle, decoder, format::stream::Stream, media};
 use log::{debug, trace, warn};
 use std::path::PathBuf;
 use std::slice;
+
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Rect {
     Text(String),
     Ass(DialogueEvent),
     Bitmap(RgbaImage),
+}
+
+trait Name {
+    fn name(&self) -> &'static str;
+}
+
+impl Name for media::Type {
+    fn name(&self) -> &'static str {
+        match self {
+            media::Type::Video => "video",
+            media::Type::Audio => "audio",
+            media::Type::Data => "data",
+            media::Type::Subtitle => "subtitle",
+            media::Type::Attachment => "attachment",
+            _ => "unknown",
+        }
+    }
+}
+
+fn get_stream(
+    mut streams: libav::format::context::common::StreamIter,
+    medium: media::Type,
+    stream_idx: Option<usize>,
+) -> Result<Stream> {
+    match stream_idx {
+        Some(stream_idx) => match streams.nth(stream_idx) {
+            Some(stream) if stream.parameters().medium() == medium => Ok(stream),
+            Some(stream) => Err(Error::msg(format!(
+                "Stream at index {} is not a {} stream (is {} stream)",
+                stream_idx,
+                medium.name(),
+                stream.parameters().medium().name()
+            ))),
+            None => Err(Error::msg(format!(
+                "File does not have a {} streams",
+                stream_idx
+            ))),
+        },
+        None => Ok(streams
+            .best(medium)
+            .ok_or_else(|| Error::msg(format!("File does not have a {} stream", medium.name())))?),
+    }
 }
 
 fn bitmap_to_image(bitmap: &libav::codec::subtitle::Bitmap) -> Result<RgbaImage> {
@@ -104,22 +148,9 @@ impl Subtitle {
         packet: &packet::Packet,
         time_base: Rational,
     ) -> Result<Self> {
-        let start = packet
-            .pts()
-            .or(packet.dts())
-            .ok_or(Error::msg("Subtitle is missing a timestamp"))?;
-        let end = start + packet.duration();
+        let (start, end) = Self::get_span(sub, packet, time_base)?;
 
-        let start = Timestamp::from_timebase(start, time_base)
-            .context("Failed to convert start timestamp")?
-            + Duration::from_ms(sub.start());
-        let end = Timestamp::from_timebase(end, time_base)
-            .context("Failed to convert end timestamp")?
-            + Duration::from_ms(sub.end());
-
-        if start == end {
-            Err(Error::msg("Subtitle is of zero length"))
-        } else {
+        if start != end {
             if end < start {
                 warn!("subtitle end is before start, will swap");
             }
@@ -144,24 +175,30 @@ impl Subtitle {
                     rects,
                 })
             }
+        } else {
+            Err(Error::msg("Subtitle is of zero length"))
         }
     }
 
-    pub fn merge(&mut self, other: Self) -> &mut Self {
-        self.start = self.start.min(other.start);
-        self.end = self.end.min(other.end);
+    fn get_span(
+        sub: &subtitle::Subtitle,
+        packet: &packet::Packet,
+        time_base: Rational,
+    ) -> Result<(Timestamp, Timestamp)> {
+        debug!("{:?}", packet.pts());
+        let start = packet
+            .pts()
+            .or(packet.dts())
+            .ok_or(Error::msg("Subtitle is missing a timestamp"))?;
+        let end = start + packet.duration();
 
-        for rect in other.rects {
-            if !self.rects.contains(&rect) {
-                self.rects.push(rect);
-            }
-        }
-
-        self
-    }
-
-    pub fn overlaps(&self, other: &Self) -> bool {
-        !(self.end < other.start || other.end < self.start)
+        let start = Timestamp::from_timebase(start, time_base)
+            .context("Failed to convert start timestamp")?
+            + Duration::from_ms(sub.start());
+        let end = Timestamp::from_timebase(end, time_base)
+            .context("Failed to convert end timestamp")?
+            + Duration::from_ms(sub.end());
+        Ok((start, end))
     }
 }
 
@@ -186,25 +223,21 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
     trace!("Opened {}", file_str);
 
     let sub_stream = get_stream(ictx.streams(), media::Type::Subtitle, stream_idx)
-        .with_context(|| format!("{}: Failed to retrieve subtitle stream", file_str))?;
+        .context("Failed to retrieve subtitle stream")?;
 
     let stream_index = sub_stream.index();
     let codec = sub_stream.parameters().id();
 
     debug!(
-        "{}: Using subtitle stream at index {}. Codec: {}",
+        "{}: Using {} subtitle stream at index {}",
         file_str,
+        codec.name(),
         stream_index,
-        codec.name()
     );
 
     let context = codec::context::Context::from_parameters(sub_stream.parameters())
         .with_context(|| format!("Failed to create codec context for {} codec", codec.name()))?;
-    trace!(
-        "{}: Created codec context for {} codec type",
-        file_str,
-        codec.name()
-    );
+    trace!("{}: {}: Created codec context", file_str, codec.name());
 
     let mut decoder = context.decoder().subtitle().with_context(|| {
         format!(
@@ -213,9 +246,14 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
             codec.name()
         )
     })?;
-    trace!("{}: Opened {} decoder", file_str, codec.name());
+    trace!("{}: {}: Opened decoder", file_str, codec.name());
 
     let mut subs = Vec::new();
+    //TODO join duplicates for bitmap subtitles within Xms
+    //Something with a hashmap of the latest subtitles?
+    //Or better a btreemap of the latest image rects?
+
+    let mut images: HashMap<RgbaImage, &mut Subtitle> = HashMap::new();
 
     for (stream, packet) in ictx.packets() {
         if stream.index() != stream_index {
@@ -225,6 +263,17 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
         if let Some(sub) = decode_subtitle(&mut decoder, &packet)? {
             match Subtitle::convert_subtitle(&sub, &packet, stream.time_base()) {
                 Ok(sub) => {
+
+                    for rect in &sub.rects {
+                        if let Rect::Bitmap(image) = rect {
+                            if let Some(prev_sub) = images.get_mut(image) {
+                                prev_sub.end = sub.start;
+                            }
+                        }
+                    }
+                    //Perhaps better to have the subtitle data structure not include rects, so it's
+                    //easier to "extend" their timestamps
+
                     subs.push(sub);
                 }
                 Err(err) => {
@@ -233,99 +282,5 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
             }
         }
     }
-    if subs.is_empty() {
-        warn!("{}: Contained no subtitles", file_str);
-    } else {
-        debug!("{}: Read {} subtitle(s)", file_str, subs.len());
-    }
     Ok(subs)
-}
-
-pub fn merge_overlapping(subtitles: Vec<Subtitle>) -> Vec<Subtitle> {
-    let mut result = Vec::new();
-
-    for sub in subtitles {
-        if result.is_empty() {
-            result.push(sub);
-        } else {
-            let last_idx = result.len() - 1;
-            let prev_sub = &mut result[last_idx];
-
-            if !prev_sub.overlaps(&sub) {
-                result.push(sub);
-            } else {
-                prev_sub.merge(sub);
-            }
-        }
-    }
-    result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn no_overlap() {
-        let a = Subtitle {
-            start: Timestamp::from_ms(100),
-            end: Timestamp::from_ms(1000),
-            rects: Default::default(),
-        };
-        let b = Subtitle {
-            start: Timestamp::from_ms(5000),
-            end: Timestamp::from_ms(5100),
-            rects: Default::default(),
-        };
-        assert_eq!(a.overlaps(&b), false);
-        assert_eq!(b.overlaps(&a), false);
-    }
-
-    #[test]
-    fn partial_overlap() {
-        let a = Subtitle {
-            start: Timestamp::from_ms(100),
-            end: Timestamp::from_ms(1000),
-            rects: Default::default(),
-        };
-        let b = Subtitle {
-            start: Timestamp::from_ms(500),
-            end: Timestamp::from_ms(5000),
-            rects: Default::default(),
-        };
-        assert_eq!(a.overlaps(&b), true);
-        assert_eq!(b.overlaps(&a), true);
-    }
-
-    #[test]
-    fn exact_overlap() {
-        let a = Subtitle {
-            start: Timestamp::from_ms(100),
-            end: Timestamp::from_ms(1000),
-            rects: Default::default(),
-        };
-        let b = Subtitle {
-            start: Timestamp::from_ms(100),
-            end: Timestamp::from_ms(1000),
-            rects: Default::default(),
-        };
-        assert_eq!(a.overlaps(&b), true);
-        assert_eq!(b.overlaps(&a), true);
-    }
-
-    #[test]
-    fn complete_overlap() {
-        let a = Subtitle {
-            start: Timestamp::from_ms(200),
-            end: Timestamp::from_ms(900),
-            rects: Default::default(),
-        };
-        let b = Subtitle {
-            start: Timestamp::from_ms(100),
-            end: Timestamp::from_ms(1000),
-            rects: Default::default(),
-        };
-        assert_eq!(a.overlaps(&b), true);
-        assert_eq!(b.overlaps(&a), true);
-    }
 }

@@ -10,20 +10,9 @@ categories = ["command-line-utilities", "multimedia"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+members = ["crates/extract"]
+
 [dependencies]
-anyhow = { version = "1.0.71", features = ["backtrace"] }
-crossbeam-channel = "0.5.8"
-ffmpeg-next = "6.0.0"
-genanki-rs = { git = "https://github.com/Hyxogen/genanki-rs.git", version = "0.3.1" }
-image = "0.24.6"
-lexopt = "0.3.0"
-log = "0.4.19"
-pretty_env_logger = "0.5.0"
-rand = "0.8.5"
-rayon = "1.7.0"
-regex = "1.9.1"
 
 [dev-dependencies]
-assert_cmd = "2.0.12"
-predicates = "3.0.3"
-tempfile = "3.6.0"
