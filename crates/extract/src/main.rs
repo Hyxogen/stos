@@ -42,8 +42,8 @@ fn print_sub(sub: &Subtitle, idx: usize) -> Result<()> {
         }
         SubtitleDialogue::Bitmap(image) => {
             let file = format!("img_{:04}.jpg", idx);
+            image.save(&file)?;
             print!(":{}:", file);
-            image.save(file)?;
         }
     }
     println!("{}:{}", sub.start.as_millis(), sub.end.as_millis());
