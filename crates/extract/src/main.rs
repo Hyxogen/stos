@@ -68,7 +68,7 @@ fn main() -> Result<()> {
         }
 
         let subs = read_subtitles(&file, args.stream_idx)
-            .with_context(|| format!("Failed to read subtitles from {}", file.to_string_lossy()))?;
+            .with_context(|| format!("Failed to read subtitles from `{}`", file.to_string_lossy()))?;
         debug!("{}: Read {} subtitles", file.to_string_lossy(), subs.len());
 
         for (idx, sub) in subs.iter().enumerate() {
