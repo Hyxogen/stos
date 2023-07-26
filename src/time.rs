@@ -15,10 +15,6 @@ impl Timestamp {
         todo!()
     }
 
-    pub fn from_timebase(ts: u64, time_base: Rational) -> Result<Self> {
-        todo!()
-    }
-
     pub fn as_millis(&self) -> u64 {
         todo!()
     }

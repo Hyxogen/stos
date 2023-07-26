@@ -50,7 +50,7 @@ mod av {
         type Error = Error;
 
         fn try_from(av_sub: AVSubtitle) -> Result<Self> {
-            let start = Timestamp::from_timebase(
+            let start = Timestamp::from_libav_ts(
                 av_sub
                     .start
                     .ok_or(Error::msg("Subtitle packet is missing a timestamp"))?
