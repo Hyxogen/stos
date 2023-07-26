@@ -22,6 +22,7 @@ impl Duration {
 
 impl Timestamp {
     const TIMEBASE: Rational = Rational(1, 1000);
+    pub const MAX: Timestamp = Self(i64::MAX);
 
     pub fn from_timebase(ts: i64, time_base: Rational) -> Result<Self> {
         let ts = ts.rescale(time_base, Self::TIMEBASE);

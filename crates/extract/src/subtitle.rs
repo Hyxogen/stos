@@ -132,7 +132,7 @@ impl TryFrom<subtitle::Rect<'_>> for Rect {
             subtitle::Rect::Text(text) => Ok(Rect::Text(text.get().to_string())),
             subtitle::Rect::Ass(ass) => Ok(Rect::Ass(ass.try_into()?)),
             subtitle::Rect::Bitmap(bitmap) => Ok(Rect::Bitmap(bitmap_to_image(&bitmap)?)),
-            _ => todo!(),
+            subtitle::Rect::None(_) => Err(Error::msg("unsupported subtile rect type")),
         }
     }
 }
@@ -147,7 +147,7 @@ pub enum SubtitleDialogue {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Subtitle {
     pub start: Timestamp,
-    pub end: Timestamp,
+    pub end: Option<Timestamp>,
     diag: SubtitleDialogue,
 }
 
@@ -178,42 +178,32 @@ impl Subtitle {
     ) -> Result<impl Iterator<Item = Self>> {
         let (start, end) = Self::get_span(sub, packet, time_base)?;
 
-        if start != end {
-            if end < start {
-                warn!("subtitle end is before start, will swap");
-            }
-            let diags: Vec<SubtitleDialogue> = sub
-                .rects()
-                .map(TryFrom::try_from)
-                .filter_map(|diag| match diag {
-                    Ok(diag) => Some(diag),
-                    Err(err) => {
-                        warn!("failed to convert a diag: {}", err);
-                        None
-                    }
-                })
-                .collect();
+        let diags: Vec<SubtitleDialogue> = sub
+            .rects()
+            .map(TryFrom::try_from)
+            .filter_map(|diag| match diag {
+                Ok(diag) => Some(diag),
+                Err(err) => {
+                    warn!("failed to convert a diag: {}", err);
+                    None
+                }
+            })
+            .collect();
 
-            if diags.is_empty() {
-                Err(Error::msg("No rects"))
-            } else {
-                Ok(diags.into_iter().map(move |diag| Self { start, end, diag }))
-            }
-        } else {
-            Err(Error::msg("Subtitle is of zero length"))
-        }
+        Ok(diags.into_iter().map(move |diag| Self { start, end, diag }))
     }
 
     fn get_span(
         sub: &subtitle::Subtitle,
         packet: &packet::Packet,
         time_base: Rational,
-    ) -> Result<(Timestamp, Timestamp)> {
+    ) -> Result<(Timestamp, Option<Timestamp>)> {
         let start = packet
             .pts()
             .or(packet.dts())
             .ok_or(Error::msg("Subtitle is missing a timestamp"))?;
         let end = start + packet.duration();
+        debug!("{}", sub.end());
 
         let start = Timestamp::from_timebase(start, time_base)
             .context("Failed to convert start timestamp")?
@@ -221,7 +211,7 @@ impl Subtitle {
         let end = Timestamp::from_timebase(end, time_base)
             .context("Failed to convert end timestamp")?
             + Duration::from_ms(sub.end());
-        Ok((start, end))
+        Ok((start, (packet.duration() != 0).then_some(end)))
     }
 }
 
@@ -271,7 +261,7 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
     })?;
     trace!("{}: {}: Opened decoder", file_str, codec.name());
 
-    let mut result = Vec::new();
+    let mut result: Vec<Rc<RefCell<Subtitle>>> = Vec::new();
 
     let mut images: HashMap<RgbaImage, Rc<RefCell<Subtitle>>> = HashMap::new();
 
@@ -284,16 +274,23 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
             match Subtitle::convert_subtitle(&sub, &packet, stream.time_base()) {
                 Ok(subtitles) => {
                     for subtitle in subtitles {
+                        if let Some(prev_sub) = result.last() {
+                            let mut prev = prev_sub.borrow_mut();
+                            if let None = prev.end {
+                                prev.end = Some(subtitle.start);
+                            }
+                        }
+
                         if let SubtitleDialogue::Bitmap(image) = subtitle.diag() {
                             if let Some(prev_sub) = images.get_mut(image) {
-                                debug!("here");
-                                prev_sub.borrow_mut().end = subtitle.start;
+                                if let Some(prev_end) = prev_sub.borrow_mut().end.as_mut() {
+                                    *prev_end = subtitle.start;
+                                }
                             } else {
                                 let image_cpy = image.clone();
                                 result.push(Rc::new(RefCell::new(subtitle)));
                                 images.insert(image_cpy, result.last().unwrap().clone());
                             }
-                            continue;
                         } else {
                             result.push(Rc::new(RefCell::new(subtitle)));
                         }

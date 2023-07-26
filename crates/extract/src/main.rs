@@ -8,6 +8,7 @@ mod ass;
 mod subtitle;
 mod time;
 
+use time::Timestamp;
 use subtitle::{read_subtitles, Subtitle, SubtitleDialogue};
 
 #[derive(Parser, Debug)]
@@ -46,7 +47,7 @@ fn print_sub(sub: &Subtitle, idx: usize) -> Result<()> {
             print!(":{}:", file);
         }
     }
-    println!("{}:{}", sub.start.as_millis(), sub.end.as_millis());
+    println!("{}:{}", sub.start.as_millis(), sub.end.unwrap_or(Timestamp::MAX).as_millis());
     Ok(())
 }
 
