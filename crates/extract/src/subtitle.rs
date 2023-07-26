@@ -5,7 +5,9 @@ use image::RgbaImage;
 use libav::util::rational::Rational;
 use libav::{codec, codec::packet, codec::subtitle, decoder, format::stream::Stream, media};
 use log::{debug, trace, warn};
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::slice;
 
 use std::collections::HashMap;
@@ -136,44 +138,66 @@ impl TryFrom<subtitle::Rect<'_>> for Rect {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum SubtitleDialogue {
+    Text(String),
+    Ass(DialogueEvent),
+    Bitmap(RgbaImage),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Subtitle {
-    pub rects: Vec<Rect>,
     pub start: Timestamp,
     pub end: Timestamp,
+    diag: SubtitleDialogue,
+}
+
+impl TryFrom<subtitle::Rect<'_>> for SubtitleDialogue {
+    type Error = Error;
+
+    fn try_from(rect: subtitle::Rect) -> Result<Self> {
+        match rect {
+            subtitle::Rect::Text(text) => Ok(SubtitleDialogue::Text(text.get().to_string())),
+            subtitle::Rect::Ass(ass) => Ok(SubtitleDialogue::Ass(ass.try_into()?)),
+            subtitle::Rect::Bitmap(bitmap) => {
+                Ok(SubtitleDialogue::Bitmap(bitmap_to_image(&bitmap)?))
+            }
+            subtitle::Rect::None(_) => Err(Error::msg("no rect present")),
+        }
+    }
 }
 
 impl Subtitle {
+    pub fn diag(&self) -> &SubtitleDialogue {
+        &self.diag
+    }
+
     pub fn convert_subtitle(
         sub: &subtitle::Subtitle,
         packet: &packet::Packet,
         time_base: Rational,
-    ) -> Result<Self> {
+    ) -> Result<impl Iterator<Item = Self>> {
         let (start, end) = Self::get_span(sub, packet, time_base)?;
 
         if start != end {
             if end < start {
                 warn!("subtitle end is before start, will swap");
             }
-            let rects: Vec<Rect> = sub
+            let diags: Vec<SubtitleDialogue> = sub
                 .rects()
                 .map(TryFrom::try_from)
-                .filter_map(|rect| match rect {
-                    Ok(rect) => Some(rect),
+                .filter_map(|diag| match diag {
+                    Ok(diag) => Some(diag),
                     Err(err) => {
-                        warn!("failed to convert a rect: {}", err);
+                        warn!("failed to convert a diag: {}", err);
                         None
                     }
                 })
                 .collect();
 
-            if rects.is_empty() {
+            if diags.is_empty() {
                 Err(Error::msg("No rects"))
             } else {
-                Ok(Self {
-                    start: start.min(end),
-                    end: end.max(start),
-                    rects,
-                })
+                Ok(diags.into_iter().map(move |diag| Self { start, end, diag }))
             }
         } else {
             Err(Error::msg("Subtitle is of zero length"))
@@ -185,7 +209,6 @@ impl Subtitle {
         packet: &packet::Packet,
         time_base: Rational,
     ) -> Result<(Timestamp, Timestamp)> {
-        debug!("{:?}", packet.pts());
         let start = packet
             .pts()
             .or(packet.dts())
@@ -248,12 +271,9 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
     })?;
     trace!("{}: {}: Opened decoder", file_str, codec.name());
 
-    let mut subs = Vec::new();
-    //TODO join duplicates for bitmap subtitles within Xms
-    //Something with a hashmap of the latest subtitles?
-    //Or better a btreemap of the latest image rects?
+    let mut result = Vec::new();
 
-    let mut images: HashMap<RgbaImage, &mut Subtitle> = HashMap::new();
+    let mut images: HashMap<RgbaImage, Rc<RefCell<Subtitle>>> = HashMap::new();
 
     for (stream, packet) in ictx.packets() {
         if stream.index() != stream_index {
@@ -262,19 +282,22 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
 
         if let Some(sub) = decode_subtitle(&mut decoder, &packet)? {
             match Subtitle::convert_subtitle(&sub, &packet, stream.time_base()) {
-                Ok(sub) => {
-
-                    for rect in &sub.rects {
-                        if let Rect::Bitmap(image) = rect {
+                Ok(subtitles) => {
+                    for subtitle in subtitles {
+                        if let SubtitleDialogue::Bitmap(image) = subtitle.diag() {
                             if let Some(prev_sub) = images.get_mut(image) {
-                                prev_sub.end = sub.start;
+                                debug!("here");
+                                prev_sub.borrow_mut().end = subtitle.start;
+                            } else {
+                                let image_cpy = image.clone();
+                                result.push(Rc::new(RefCell::new(subtitle)));
+                                images.insert(image_cpy, result.last().unwrap().clone());
                             }
+                            continue;
+                        } else {
+                            result.push(Rc::new(RefCell::new(subtitle)));
                         }
                     }
-                    //Perhaps better to have the subtitle data structure not include rects, so it's
-                    //easier to "extend" their timestamps
-
-                    subs.push(sub);
                 }
                 Err(err) => {
                     warn!("failed to convert subtitle: {}", err);
@@ -282,5 +305,10 @@ pub fn read_subtitles(file: &PathBuf, stream_idx: Option<usize>) -> Result<Vec<S
             }
         }
     }
-    Ok(subs)
+    drop(images);
+
+    Ok(result
+        .into_iter()
+        .map(|sub| Rc::into_inner(sub).unwrap().into_inner())
+        .collect())
 }

@@ -1,14 +1,14 @@
 extern crate ffmpeg_next as libav;
 use anyhow::{Context, Result};
 use clap::Parser;
-use log::{trace, debug};
+use log::{debug, trace};
 use std::path::PathBuf;
 
 mod ass;
 mod subtitle;
 mod time;
 
-use subtitle::{read_subtitles, Rect, Subtitle};
+use subtitle::{read_subtitles, Subtitle, SubtitleDialogue};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -30,25 +30,24 @@ fn print_escaped(s: &str) {
     }
 }
 
-fn print_rect(rect: &Rect) {
-    match rect {
-        Rect::Text(text) => {
+fn print_sub(sub: &Subtitle, idx: usize) -> Result<()> {
+    match sub.diag() {
+        SubtitleDialogue::Text(text) => {
             print_escaped(text);
             print!("::");
         }
-        Rect::Ass(ass) => {
+        SubtitleDialogue::Ass(ass) => {
             print_escaped(&ass.text.dialogue);
             print!("::");
         }
-        _ => todo!(),
+        SubtitleDialogue::Bitmap(image) => {
+            let file = format!("img_{:04}.jpg", idx);
+            print!(":{}:", file);
+            image.save(file)?;
+        }
     }
-}
-
-fn print_sub(sub: &Subtitle) {
-    for rect in &sub.rects {
-        print_rect(rect);
-        println!("{}:{}", sub.start.as_millis(), sub.end.as_millis());
-    }
+    println!("{}:{}", sub.start.as_millis(), sub.end.as_millis());
+    Ok(())
 }
 
 //text:image:begin:end
@@ -72,8 +71,8 @@ fn main() -> Result<()> {
             .with_context(|| format!("Failed to read subtitles from {}", file.to_string_lossy()))?;
         debug!("{}: Read {} subtitles", file.to_string_lossy(), subs.len());
 
-        for sub in &subs {
-            print_sub(&sub);
+        for (idx, sub) in subs.iter().enumerate() {
+            print_sub(sub, idx)?;
         }
         first = false;
     }
