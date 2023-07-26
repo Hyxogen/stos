@@ -113,14 +113,16 @@ impl FromStr for Timestamp {
                 let mins: u8 = mins.parse()?;
                 let secs: u8 = secs.parse()?;
                 Ok(Timestamp::from_secs(mins as u32 * 60 + secs as u32))
-            },
+            }
             [hours, mins, secs] => {
                 let hours: u8 = hours.parse()?;
                 let mins: u8 = mins.parse()?;
-                let secs: u8 = secs.parse()?;//TODO better errors
-                Ok(Timestamp::from_secs(60 * (hours as u32 * 60 + mins as u32) + secs as  u32))
-            },
-            _ => Err(Error::msg("invalid timestamp"))
+                let secs: u8 = secs.parse()?; //TODO better errors
+                Ok(Timestamp::from_secs(
+                    60 * (hours as u32 * 60 + mins as u32) + secs as u32,
+                ))
+            }
+            _ => Err(Error::msg("invalid timestamp")),
         }
     }
 }

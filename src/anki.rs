@@ -99,8 +99,8 @@ pub fn create_all_notes(
             Field::new("Text"),
         ],
         vec![Template::new("Card 1")
-            .qfmt("{{Text}}")
-            .afmt("{{Image}}<br>{{Audio}}<br>{{Text}}")],
+            .qfmt("{{Image}}<br>{{Audio}}<br><h1 style=\"text-align: center\">{{Text}}")
+            .afmt("{{Image}}<br>{{Audio}}<br><h1 style=\"text-align: center\">{{Text}}")],
     );
     trace!("created note model");
 

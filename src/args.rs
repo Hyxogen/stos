@@ -150,7 +150,6 @@ impl Args {
                     } else {
                         std::process::exit(1);
                     }
-
                 }
                 Short('a') | Long("audio") => {
                     args.gen_audio = true;
