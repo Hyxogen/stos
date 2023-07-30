@@ -13,7 +13,7 @@ fn generate_audio_command(
     stream_index: Option<usize>,
     padding: (Duration, Duration),
     mut format: Format<'_>,
-) -> Result<Command> {
+) -> Result<Vec<Command>> {
     let file_str = file.to_string_lossy();
 
     let ictx = libav::format::input(file).context("Failed to open file")?;
@@ -24,8 +24,12 @@ fn generate_audio_command(
         .index();
     debug!("{}: Using audio stream at index {}", file_str, stream_index);
 
-    let mut command = Command::new("ffmpeg");
+    let mut cmds = Vec::new();
     for (idx, subtitle) in subs.iter().enumerate() {
+        if idx % 512 == 0 {
+            cmds.push(Command::new("ffmpeg"));
+        }
+        let command = cmds.last_mut().unwrap();
         format.sub_index = idx;
 
         let start = subtitle
@@ -40,14 +44,16 @@ fn generate_audio_command(
         command.arg(format.to_string());
     }
 
-    command.arg("-loglevel").arg("warning");
-    command.arg("-i").arg(file);
+    for cmd in cmds.iter_mut() {
+        cmd.arg("-loglevel").arg("warning");
+        cmd.arg("-i").arg(file);
+    }
     trace!(
         "{}: Generated a command to extract audio at {} positions",
         file_str,
         subs.len()
     );
-    Ok(command)
+    Ok(cmds)
 }
 
 pub fn generate_audio_commands(
@@ -70,7 +76,7 @@ pub fn generate_audio_commands(
 
         let mut format = Format::new(subtitles.len(), audio_files.len(), format)?;
         format.file_index = file_index;
-        commands.push(
+        commands.extend(
             generate_audio_command(audio_file, subtitles, audio_stream, padding, format)
                 .with_context(|| {
                     format!(
