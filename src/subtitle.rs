@@ -1,12 +1,15 @@
 use crate::ass::DialogueEvent;
 use crate::time::Timestamp;
 use anyhow::Result;
+use image::RgbaImage;
+use log::trace;
 use std::path::Path;
 
 mod av {
     use crate::ass::DialogueEvent;
     use crate::time::{Duration, Timestamp};
     use anyhow::{bail, Context, Error, Result};
+    use image::RgbaImage;
     use libav::codec;
     use libav::codec::{decoder, packet::Packet, subtitle};
     use libav::format::context::{common::StreamIter, Input};
@@ -21,7 +24,7 @@ mod av {
     pub(super) enum Rect {
         Text(String),
         Ass(DialogueEvent),
-        Bitmap(String),
+        Bitmap(RgbaImage),
     }
 
     #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -43,8 +46,8 @@ mod av {
         fn try_from(rect: subtitle::Rect) -> Result<Self> {
             match rect {
                 subtitle::Rect::Text(text) => Ok(Rect::Text(text.get().to_string())),
-                subtitle::Rect::Ass(ass) => Ok(Rect::Ass(ass.try_into()?)), //implement
-                subtitle::Rect::Bitmap(_) => Ok(Rect::Bitmap("a".to_string())), //implement
+                subtitle::Rect::Ass(ass) => Ok(Rect::Ass(ass.try_into()?)),
+                subtitle::Rect::Bitmap(bitmap) => Ok(Rect::Bitmap(bitmap_to_image(&bitmap)?)),
                 _ => todo!(),
             }
         }
@@ -169,6 +172,68 @@ mod av {
         }
     }
 
+    fn bitmap_to_image(bitmap: &subtitle::Bitmap) -> Result<RgbaImage> {
+        if bitmap.colors() <= 256 {
+            let width: usize = bitmap
+                .width()
+                .try_into()
+                .context("failed to convert u32 to usize")?;
+            let height: usize = bitmap
+                .height()
+                .try_into()
+                .context("failed to convert u32 to usize")?;
+
+            // The bitmap is stored using a palette and an indices array into the palette.
+
+            // There is a linesize[1] which seems like the one to use for the palette. But that
+            // appears to be not the case. linesize[1] seems to be smaller than the indices allow
+            // for. I've also looked at other code bases that decode bitmaps and they also only
+            // seem to use linesize[0]
+            let linesize: usize = unsafe { (*bitmap.as_ptr()).linesize[0] }
+                .try_into()
+                .context("invalid linesize")?;
+
+            let palette = unsafe {
+                std::slice::from_raw_parts(
+                    (*bitmap.as_ptr()).data[1] as *mut u32,
+                    width * height * linesize,
+                )
+            };
+
+            let indices = unsafe {
+                std::slice::from_raw_parts((*bitmap.as_ptr()).data[0], width * height * linesize)
+            };
+
+            let mut data = Vec::new();
+
+            for y in 0..height {
+                for x in 0..width {
+                    let index: usize = indices[y * linesize + x]
+                        .try_into()
+                        .context("failed to convert u32 to usize")?;
+
+                    let argb = palette[index].to_le_bytes();
+                    let a = argb[0];
+                    let r = argb[1];
+                    let g = argb[2];
+                    let b = argb[3];
+
+                    data.push(r);
+                    data.push(g);
+                    data.push(b);
+                    data.push(a);
+                }
+            }
+
+            // These unwraps will not fail since in the begin we converted the width and height
+            // from usize
+            RgbaImage::from_raw(width.try_into().unwrap(), height.try_into().unwrap(), data)
+                .ok_or(Error::msg("failed to convert bitmap image"))
+        } else {
+            bail!("Unsupported bitmap format");
+        }
+    }
+
     fn create_decoder(
         params: codec::parameters::Parameters,
     ) -> Result<decoder::subtitle::Subtitle> {
@@ -203,7 +268,7 @@ mod av {
                     Ok(sub) => {
                         if let Some(prev_sub) = subs.last_mut() {
                             if prev_sub.end.is_none() {
-                                prev_sub.end = sub.end;
+                                prev_sub.end = Some(sub.start);
                             }
                         }
 
@@ -253,7 +318,7 @@ mod av {
 pub enum Dialogue {
     Text(String),
     Ass(DialogueEvent),
-    Bitmap(String),
+    Bitmap(RgbaImage),
 }
 
 pub struct Subtitle {
