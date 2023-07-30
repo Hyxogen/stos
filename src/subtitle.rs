@@ -53,9 +53,7 @@ mod av {
             let start = Timestamp::from_libav_ts(
                 av_sub
                     .start
-                    .ok_or(Error::msg("Subtitle packet is missing a timestamp"))?
-                    .try_into()
-                    .context("Subtitle packet has negative timestamp")?,
+                    .ok_or(Error::msg("Subtitle packet is missing a timestamp"))?,
                 AVSubtitle::TIMEBASE,
             )?;
 
@@ -72,11 +70,7 @@ mod av {
                 None
             };
 
-            let end = if let Some(duration) = duration {
-                Some(start + duration)
-            } else {
-                None
-            };
+            let end = duration.map(|duration| start + duration);
 
             let rects = av_sub
                 .subtitle
