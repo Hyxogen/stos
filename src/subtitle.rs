@@ -2,7 +2,6 @@ use crate::time::Timestamp;
 use anyhow::Result;
 use std::path::Path;
 
-
 mod av {
     use crate::time::{Duration, Timestamp};
     use anyhow::{bail, Context, Error, Result};
@@ -40,8 +39,8 @@ mod av {
         fn try_from(rect: subtitle::Rect) -> Result<Self> {
             match rect {
                 subtitle::Rect::Text(text) => Ok(Rect::Text(text.get().to_string())),
-                subtitle::Rect::Ass(text) => Ok(Rect::Ass(text.get().to_string())),//implement
-                subtitle::Rect::Bitmap(_) => Ok(Rect::Bitmap("a".to_string())),//implement
+                subtitle::Rect::Ass(text) => Ok(Rect::Ass(text.get().to_string())), //implement
+                subtitle::Rect::Bitmap(_) => Ok(Rect::Bitmap("a".to_string())),     //implement
                 _ => todo!(),
             }
         }
@@ -261,17 +260,13 @@ impl Subtitle {
     fn convert(subtitle: av::Subtitle) -> impl Iterator<Item = Subtitle> {
         let start = subtitle.start();
         let end = subtitle.end();
-        subtitle
-            .rects
-            .into_iter()
-            .filter_map(move |rect| match end {
-                Some(end) => Some(Self {
-                    start,
-                    end,
-                    diag: rect.into(),
-                }),
-                None => None,
+        subtitle.rects.into_iter().filter_map(move |rect| {
+            end.map(|end| Self {
+                start,
+                end,
+                diag: rect.into(),
             })
+        })
     }
 
     pub fn start(&self) -> Timestamp {

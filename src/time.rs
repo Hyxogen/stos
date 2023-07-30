@@ -1,7 +1,7 @@
-use std::ops::Add;
+use anyhow::Result;
 use libav::mathematics::rescale::Rescale;
 use libav::util::rational::Rational;
-use anyhow::Result;
+use std::ops::Add;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Timestamp(u64);
@@ -10,7 +10,7 @@ pub struct Duration(u64);
 
 impl Timestamp {
     pub fn from_libav_ts(ts: i64, time_base: Rational) -> Result<Self> {
-        //TODO perform rescale with proper check 
+        //TODO perform rescale with proper check
         //https://ffmpeg.org/doxygen/trunk/group__lavu__math.html#ga82d40664213508918093822461cc597e
         todo!()
     }
