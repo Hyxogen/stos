@@ -1,8 +1,10 @@
+use crate::ass::DialogueEvent;
 use crate::time::Timestamp;
 use anyhow::Result;
 use std::path::Path;
 
 mod av {
+    use crate::ass::DialogueEvent;
     use crate::time::{Duration, Timestamp};
     use anyhow::{bail, Context, Error, Result};
     use libav::codec;
@@ -12,15 +14,17 @@ mod av {
     use libav::mathematics::rescale::Rescale;
     use libav::media;
     use libav::util::rational::Rational;
-    use log::warn;
+    use log::{trace, warn};
     use std::path::Path;
 
+    #[derive(Clone, Debug, Eq, PartialEq, Hash)]
     pub(super) enum Rect {
         Text(String),
-        Ass(String),
+        Ass(DialogueEvent),
         Bitmap(String),
     }
 
+    #[derive(Clone, Debug, Eq, PartialEq, Hash)]
     pub(super) struct Subtitle {
         start: Timestamp,
         end: Option<Timestamp>,
@@ -39,8 +43,8 @@ mod av {
         fn try_from(rect: subtitle::Rect) -> Result<Self> {
             match rect {
                 subtitle::Rect::Text(text) => Ok(Rect::Text(text.get().to_string())),
-                subtitle::Rect::Ass(text) => Ok(Rect::Ass(text.get().to_string())), //implement
-                subtitle::Rect::Bitmap(_) => Ok(Rect::Bitmap("a".to_string())),     //implement
+                subtitle::Rect::Ass(ass) => Ok(Rect::Ass(ass.try_into()?)), //implement
+                subtitle::Rect::Bitmap(_) => Ok(Rect::Bitmap("a".to_string())), //implement
                 _ => todo!(),
             }
         }
@@ -57,6 +61,12 @@ mod av {
                 AVSubtitle::TIMEBASE,
             )?;
 
+            // from mpv source code (sub/sd_lavc.c)
+            // libavformat sets duration==0, even if the duration is unknown. Some files
+            // also have actually subtitle packets with duration explicitly set to 0
+            // (yes, at least some of such mkv files were muxed by libavformat).
+            // Assume there are no bitmap subs that actually use duration==0 for
+            // hidden subtitle events.
             let duration = if av_sub.subtitle.end() > av_sub.subtitle.start()
                 && av_sub.subtitle.end() != u32::MAX
             {
@@ -118,7 +128,7 @@ mod av {
                         .pts()
                         .or(packet.dts())
                         .map(|v| v.rescale(timebase, Self::TIMEBASE)),
-                    duration: 0,
+                    duration: packet.duration(),
                 })),
                 false => Ok(None),
             }
@@ -207,13 +217,22 @@ mod av {
                 }
             }
         }
+        trace!("Read {} subtitles", subs.len());
         Ok(subs)
     }
 
     fn read_subtitles(ictx: Input, stream_idx: Option<usize>) -> Result<Vec<Subtitle>> {
         let stream = get_stream(ictx.streams(), media::Type::Subtitle, stream_idx)?;
         let stream_idx = stream.index();
+        trace!(
+            "Using {} stream at index {}",
+            stream.parameters().id().name(),
+            stream_idx
+        );
+
         let decoder = create_decoder(stream.parameters())?;
+        trace!("Created {} decoder", stream.parameters().id().name());
+
         read_subtitles_from_stream(ictx, decoder, stream_idx)
     }
 
@@ -222,7 +241,10 @@ mod av {
         stream_idx: Option<usize>,
     ) -> Result<Vec<Subtitle>> {
         let ictx = libav::format::input(file).context("Failed to open file")?;
-        //trace!("Opened {} for reading subtitles", file.to_string_lossy());
+        trace!(
+            "Opened a {} for reading subtitles",
+            file.as_ref().to_string_lossy()
+        );
 
         read_subtitles(ictx, stream_idx)
     }
@@ -230,7 +252,7 @@ mod av {
 
 pub enum Dialogue {
     Text(String),
-    Ass(String),
+    Ass(DialogueEvent),
     Bitmap(String),
 }
 
