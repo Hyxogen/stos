@@ -1,19 +1,18 @@
 use crate::ass::DialogueEvent;
-use crate::time::Timestamp;
+use crate::time::Timespan;
 use anyhow::Result;
 use image::RgbaImage;
-use log::trace;
 use std::path::Path;
 
 mod av {
     use crate::ass::DialogueEvent;
     use crate::time::{Duration, Timestamp};
+    use crate::util::get_stream;
     use anyhow::{bail, Context, Error, Result};
     use image::RgbaImage;
     use libav::codec;
     use libav::codec::{decoder, packet::Packet, subtitle};
-    use libav::format::context::{common::StreamIter, Input};
-    use libav::format::stream::Stream;
+    use libav::format::context::Input;
     use libav::mathematics::rescale::Rescale;
     use libav::media;
     use libav::util::rational::Rational;
@@ -138,40 +137,6 @@ mod av {
         }
     }
 
-    fn get_medium_name(medium: media::Type) -> &'static str {
-        match medium {
-            media::Type::Video => "video",
-            media::Type::Audio => "audio",
-            media::Type::Data => "data",
-            media::Type::Subtitle => "subtitle",
-            media::Type::Attachment => "attachment",
-            _ => "unknown",
-        }
-    }
-
-    fn get_stream(
-        mut streams: StreamIter,
-        medium: media::Type,
-        stream_idx: Option<usize>,
-    ) -> Result<Stream> {
-        if let Some(stream_idx) = stream_idx {
-            match streams.nth(stream_idx) {
-                Some(stream) if stream.parameters().medium() == medium => Ok(stream),
-                Some(stream) => bail!(
-                    "Stream at index {} is not a {} stream (is {} stream)",
-                    stream_idx,
-                    get_medium_name(medium),
-                    get_medium_name(stream.parameters().medium()),
-                ),
-                None => bail!("File does not have {} streams", stream_idx),
-            }
-        } else if let Some(stream) = streams.best(medium) {
-            Ok(stream)
-        } else {
-            bail!("File does not have a `{}` stream", get_medium_name(medium));
-        }
-    }
-
     fn bitmap_to_image(bitmap: &subtitle::Bitmap) -> Result<RgbaImage> {
         if bitmap.colors() <= 256 {
             let width: usize = bitmap
@@ -288,6 +253,7 @@ mod av {
 
     fn read_subtitles(ictx: Input, stream_idx: Option<usize>) -> Result<Vec<Subtitle>> {
         let stream = get_stream(ictx.streams(), media::Type::Subtitle, stream_idx)?;
+        trace!("duration: {}", stream.duration());
         let stream_idx = stream.index();
         trace!(
             "Using {} stream at index {}",
@@ -322,8 +288,7 @@ pub enum Dialogue {
 }
 
 pub struct Subtitle {
-    start: Timestamp,
-    end: Timestamp,
+    timespan: Timespan,
     diag: Dialogue,
 }
 
@@ -343,19 +308,14 @@ impl Subtitle {
         let end = subtitle.end();
         subtitle.rects.into_iter().filter_map(move |rect| {
             end.map(|end| Self {
-                start,
-                end,
+                timespan: Timespan::new(start, end),
                 diag: rect.into(),
             })
         })
     }
 
-    pub fn start(&self) -> Timestamp {
-        self.start
-    }
-
-    pub fn end(&self) -> Timestamp {
-        self.end
+    pub fn timespan(&self) -> Timespan {
+        self.timespan
     }
 
     pub fn dialogue(&self) -> &Dialogue {
