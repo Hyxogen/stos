@@ -26,4 +26,4 @@ regex = "1.9.1"
 [dev-dependencies]
 assert_cmd = "2.0.12"
 predicates = "3.0.3"
-tempfile = "3.6.0"
+tempfile = "3.7.1"
