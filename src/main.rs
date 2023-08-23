@@ -4,8 +4,9 @@ use crossbeam_channel::{unbounded, Sender};
 use genanki_rs::{Deck, Package};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
-use log::{error, trace, Log};
+use log::{error, trace};
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 mod anki;
@@ -22,7 +23,7 @@ use anki::create_notes;
 use args::Args;
 use audio::generate_audio_commands;
 use subtitle::{read_subtitles_from_file, Dialogue, Subtitle};
-use time::{Timespan, Timestamp};
+use time::{Duration, Timespan, Timestamp};
 
 pub struct SubtitleBundle {
     sub: Subtitle,
@@ -132,7 +133,36 @@ impl<'a, 'b> Job<'a, 'b> {
     }
 }
 
-fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
+fn merge_overlapping<I>(subs: I, max_dist: Duration) -> Vec<Subtitle>
+where
+    I: Iterator<Item = Subtitle>,
+{
+    let mut result: Vec<Subtitle> = Vec::new();
+    let mut diags: HashMap<Dialogue, usize> = HashMap::new();
+    let mut count = 0;
+
+    for sub in subs {
+        count += 1usize;
+        if let Some(idx) = diags.get(sub.dialogue()) {
+            let prev_sub = &mut result[*idx];
+            if prev_sub.timespan().end() + max_dist >= sub.timespan().start() {
+                prev_sub.set_timespan(Timespan::new(
+                    prev_sub.timespan().start(),
+                    sub.timespan().end(),
+                ));
+                continue;
+            }
+        }
+        diags.insert(sub.dialogue().clone(), result.len());
+        result.push(sub);
+    }
+
+    trace!("merged {} subs into {}", count, result.len());
+
+    result
+}
+
+fn run(args: &Args, multi: MultiProgress) -> Result<()> {
     trace!(
         "extracting subtitles form {} file(s)",
         args.sub_files().len()
@@ -168,6 +198,17 @@ fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
         .map(|result| result.map(|subs| subs.collect()))
         .collect::<Result<Vec<Vec<Subtitle>>>>()?;
 
+    let subtitles = if args.merge_subs() {
+        trace!("merging subtitles");
+        subtitles
+            .into_iter()
+            .map(|subs| merge_overlapping(subs.into_iter(), args.merge_diff()))
+            .collect()
+    } else {
+        trace!("not merging subtitles");
+        subtitles
+    };
+
     let mut subtitles: Vec<Vec<SubtitleBundle>> = subtitles
         .into_iter()
         .map(|subs| {
@@ -202,7 +243,7 @@ fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
         for (sub_idx, sub) in subs.iter_mut().enumerate() {
             if let Dialogue::Bitmap(_) = sub.sub().dialogue() {
                 sub.set_sub_image(&format!(
-                    "sub_{:0max_file_width$}_{:0max_width$}.png",
+                    "sub_{:0max_file_width$}_{:0max_width$}.jpg",
                     file_idx, sub_idx
                 ));
             }
@@ -224,14 +265,12 @@ fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
 
     let (sender, receiver) = unbounded();
 
-    let m = MultiProgress::new();
     let style = ProgressStyle::with_template(
         "{msg:9!} [{elapsed_precise}] {bar:50.cyan/blue} {percent:>4}% [eta {eta:<}]",
     )
     .unwrap()
     .progress_chars("##-");
-    LogWrapper::new(m.clone(), logger).try_init().unwrap();
-    let audio_pb = m.add(ProgressBar::new(0));
+    let audio_pb = multi.add(ProgressBar::new(0));
     audio_pb.set_message("audio");
     audio_pb.set_style(style.clone());
 
@@ -263,7 +302,7 @@ fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
             });
         }
         //jobs.extend(tmp.into_iter().map(Into::into));
-        let image_pb = m.add(ProgressBar::new(subs.len().try_into().unwrap()));
+        let image_pb = multi.add(ProgressBar::new(subs.len().try_into().unwrap()));
         image_pb.set_style(style.clone());
         image_pb.set_message(file.file_stem().unwrap().to_string_lossy().to_string());
 
@@ -294,22 +333,26 @@ fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
 
     trace!("generated {} jobs", jobs.len());
 
-    std::thread::scope(|s| -> Result<()> {
-        std::iter::repeat(receiver).take(5).for_each(|receiver| {
-            s.spawn(|| match write_images(receiver) {
-                Ok(_) => {
-                    trace!("converted images");
-                }
-                Err(err) => {
-                    error!("failed to convert images: {:?}", err);
-                }
+    if !args.no_media() {
+        std::thread::scope(|s| -> Result<()> {
+            std::iter::repeat(receiver).take(5).for_each(|receiver| {
+                s.spawn(|| match write_images(receiver) {
+                    Ok(_) => {
+                        trace!("converted images");
+                    }
+                    Err(err) => {
+                        error!("failed to convert images: {:?}", err);
+                    }
+                });
             });
-        });
 
-        jobs.into_par_iter()
-            .map(Job::execute)
-            .collect::<Result<_>>()
-    })?;
+            jobs.into_par_iter()
+                .map(Job::execute)
+                .collect::<Result<_>>()
+        })?;
+    } else {
+        trace!("not executing jobs because --no-media is specified");
+    }
 
     audio_pb.finish_with_message("done");
 
@@ -363,12 +406,15 @@ fn main() -> Result<()> {
     let logger = pretty_env_logger::formatted_builder()
         .filter_level(args.verbosity())
         .build();
+
+    let multi = MultiProgress::new();
+    LogWrapper::new(multi.clone(), logger).try_init().unwrap();
     trace!("initialized logger");
     //execute
 
     libav::init().context("Failed to initialize libav")?;
 
-    run(&args, logger)?;
+    run(&args, multi.clone())?;
     /*
     if let Err(error) = run() {
         //print pretty error

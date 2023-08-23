@@ -3,6 +3,8 @@ use crate::subtitle::Dialogue;
 use anyhow::{Context, Result};
 use genanki_rs::{Field, Model, Note, Template};
 
+use log::trace;
+
 fn to_audio<S: AsRef<str>>(path: S) -> String {
     format!("[sound:{}]", path.as_ref())
 }

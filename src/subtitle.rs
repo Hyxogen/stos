@@ -253,7 +253,6 @@ mod av {
 
     fn read_subtitles(ictx: Input, stream_idx: Option<usize>) -> Result<Vec<Subtitle>> {
         let stream = get_stream(ictx.streams(), media::Type::Subtitle, stream_idx)?;
-        trace!("duration: {}", stream.duration());
         let stream_idx = stream.index();
         trace!(
             "Using {} stream at index {}",
@@ -279,6 +278,7 @@ mod av {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Dialogue {
     Text(String),
     Ass(DialogueEvent),
@@ -312,8 +312,13 @@ impl Subtitle {
         })
     }
 
-    pub fn timespan(&self) -> Timespan {
+    pub const fn timespan(&self) -> Timespan {
         self.timespan
+    }
+
+    pub fn set_timespan(&mut self, span: Timespan) -> &mut Self {
+        self.timespan = span;
+        self
     }
 
     pub fn dialogue(&self) -> &Dialogue {

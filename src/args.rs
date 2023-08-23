@@ -67,6 +67,9 @@ pub struct Args {
     blacklist: Vec<Regex>,
     whitelist: Vec<Regex>,
 
+    merge: bool,
+    merge_diff: Duration,
+
     media_files: Vec<PathBuf>,
 
     gen_audio: bool,
@@ -78,6 +81,8 @@ pub struct Args {
     video_stream: Option<usize>,
     image_width: Option<u32>,
     image_height: Option<u32>,
+
+    no_media: bool,
 
     deck_id: i64,
     deck_name: String,
@@ -97,6 +102,8 @@ impl Default for Args {
             end: Timestamp::MAX,
             blacklist: Default::default(),
             whitelist: Default::default(),
+            merge: false,
+            merge_diff: Duration::from_millis(250),
             media_files: Default::default(),
             gen_audio: false,
             audio_stream: Default::default(),
@@ -106,6 +113,7 @@ impl Default for Args {
             video_stream: Default::default(),
             image_width: Default::default(),
             image_height: Default::default(),
+            no_media: false,
             deck_id: random(),
             deck_name: DEFAULT_DECK_NAME.to_string(),
             deck_desc: DEFAULT_DECK_DESC.to_string(),
@@ -152,6 +160,9 @@ impl Args {
                     args.whitelist
                         .push(Regex::new(&re).context("Failed to compile regex for whitelist")?)
                 }
+                Long("merge") => {
+                    args.merge = true;
+                }
                 Short('a') => {
                     args.gen_audio = true;
                 }
@@ -169,6 +180,9 @@ impl Args {
                 }
                 Long("video-stream") => {
                     args.video_stream = Some(Self::convert(parser.value()?)?.parse()?)
+                }
+                Long("no-media") => {
+                    args.no_media = true;
                 }
                 Long("id") => args.deck_id = Self::convert(parser.value()?)?.parse()?,
                 Long("name") => args.deck_name = Self::convert(parser.value()?)?,
@@ -260,6 +274,14 @@ impl Args {
         &self.whitelist
     }
 
+    pub fn merge_subs(&self) -> bool {
+        self.merge
+    }
+
+    pub fn merge_diff(&self) -> Duration {
+        self.merge_diff
+    }
+
     pub fn media_files(&self) -> &Vec<PathBuf> {
         &self.media_files
     }
@@ -286,6 +308,10 @@ impl Args {
 
     pub fn gen_images(&self) -> bool {
         self.gen_images
+    }
+
+    pub fn no_media(&self) -> bool {
+        self.no_media
     }
 
     pub fn deck_id(&self) -> i64 {
