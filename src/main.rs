@@ -1,25 +1,89 @@
 extern crate ffmpeg_next as libav;
 use anyhow::{bail, Context, Result};
-use log::trace;
+use crossbeam_channel::{unbounded, Sender};
+use genanki_rs::{Deck, Package};
+use log::{debug, error, trace};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
+mod anki;
 mod args;
 mod ass;
 mod audio;
+mod image;
 mod subtitle;
 mod time;
 mod util;
 
+use crate::image::{extract_images_from_file, write_images};
+use anki::create_notes;
 use args::Args;
 use audio::generate_audio_commands;
 use subtitle::{read_subtitles_from_file, Dialogue, Subtitle};
+use time::Timestamp;
+
+pub struct SubtitleBundle {
+    sub: Subtitle,
+    sub_image: Option<String>,
+    audio: Option<String>,
+    image: Option<String>,
+}
+
+impl From<Subtitle> for SubtitleBundle {
+    fn from(sub: Subtitle) -> Self {
+        Self {
+            sub,
+            sub_image: None,
+            audio: None,
+            image: None,
+        }
+    }
+}
+
+impl SubtitleBundle {
+    pub fn sub(&self) -> &Subtitle {
+        &self.sub
+    }
+
+    pub fn sub_image(&self) -> Option<&str> {
+        self.sub_image.as_deref()
+    }
+
+    pub fn set_sub_image(&mut self, sub_image: &str) -> &mut Self {
+        self.sub_image = Some(sub_image.to_string());
+        self
+    }
+
+    pub fn audio(&self) -> Option<&str> {
+        self.audio.as_deref()
+    }
+
+    pub fn set_audio(&mut self, audio: &str) -> &mut Self {
+        self.audio = Some(audio.to_string());
+        self
+    }
+
+    pub fn image(&self) -> Option<&str> {
+        self.image.as_deref()
+    }
+
+    pub fn set_image(&mut self, image: &str) -> &mut Self {
+        self.image = Some(image.to_string());
+        self
+    }
+}
 
 enum Job<'a, 'b> {
     Command(std::process::Command),
     WriteImage {
-        path: &'a PathBuf,
+        path: &'a std::path::Path,
         image: &'b image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    },
+    ExtractImages {
+        path: &'a PathBuf,
+        points: Vec<(Timestamp, &'b str)>,
+        stream_idx: Option<usize>,
+        sender: Sender<(String, image::DynamicImage)>,
     },
 }
 
@@ -33,7 +97,15 @@ impl<'a, 'b> Job<'a, 'b> {
     pub fn execute(self) -> Result<()> {
         match self {
             Job::Command(command) => Self::execute_command(command),
-            Job::WriteImage { .. } => todo!(),
+            Job::WriteImage { path, image } => {
+                Ok(image.save(path).context("Failed to save image")?)
+            }
+            Job::ExtractImages {
+                path,
+                points,
+                stream_idx,
+                sender,
+            } => extract_images_from_file(path, points.into_iter(), stream_idx, sender),
         }
     }
 
@@ -71,64 +143,138 @@ fn run(args: &Args) -> Result<()> {
 
     let max_file_width = (media_files.len().ilog10() + 1) as usize;
 
-    let subtitles = args
+    let mut subtitles = args
         .sub_files()
         .iter()
         .map(|file| read_subtitles_from_file(&file, args.sub_stream()))
-        .map(|result| result.map(|subs| subs.collect()))
-        .collect::<Result<Vec<Vec<Subtitle>>>>()?;
+        .map(|result| result.map(|subs| subs.map(Into::into).collect()))
+        .collect::<Result<Vec<Vec<SubtitleBundle>>>>()?;
 
     let mut jobs: Vec<Job> = Vec::new();
 
-    if args.gen_audio() {
-        trace!("generating audio file names");
-        let audio_names: Vec<Vec<String>> = subtitles
-            .iter()
-            .enumerate()
-            .map(|(file_idx, subs)| {
-                if !subs.is_empty() {
-                    let max_index = subs.len();
-                    let max_width: usize = (max_index.ilog10() + 1) as usize;
+    for (file_idx, subs) in subtitles.iter_mut().enumerate() {
+        let max_index = subs.len();
+        let max_width: usize = (max_index.ilog10() + 1) as usize;
 
-                    (0..max_index)
-                        .map(|sub_idx| {
-                            format!(
-                                "audio_{:0max_file_width$}_{:0max_width$}.mka",
-                                file_idx, sub_idx
-                            )
-                        })
-                        .collect()
-                } else {
-                    Default::default()
-                }
-            })
-            .collect();
+        for (sub_idx, sub) in subs.iter_mut().enumerate() {
+            if let Dialogue::Bitmap(_) = sub.sub().dialogue() {
+                sub.set_sub_image(&format!(
+                    "sub_{:0max_file_width$}_{:0max_width$}.png",
+                    file_idx, sub_idx
+                ));
+            }
 
-        trace!("generating FFmpeg commands to extract audio");
-        for ((file, subs), names) in media_files
-            .iter()
-            .zip(subtitles.iter())
-            .zip(audio_names.iter())
-        {
-            jobs.extend(
-                generate_audio_commands(
-                    file,
-                    subs.iter().map(Subtitle::timespan).zip(names.iter()),
-                    args.audio_stream(),
-                )?
-                .into_iter()
-                .map(Into::into),
-            );
+            if args.gen_audio() {
+                sub.set_audio(&format!(
+                    "audio_{:0max_file_width$}_{:0max_width$}.mka",
+                    file_idx, sub_idx
+                ));
+            }
+            if args.gen_images() {
+                sub.set_image(&format!(
+                    "image_{:0max_file_width$}_{:0max_width$}.jpg",
+                    file_idx, sub_idx
+                ));
+            }
         }
-    } else {
-        trace!("not extracting audio");
+    }
+
+    let (sender, receiver) = unbounded();
+
+    for (sender, (file, subs)) in
+        std::iter::repeat(sender).zip(media_files.iter().zip(subtitles.iter()))
+    {
+        let tmp = generate_audio_commands(
+            file,
+            subs.iter().filter_map(|bundle| {
+                bundle
+                    .audio()
+                    .map(|out_file| (bundle.sub().timespan(), out_file))
+            }),
+            args.audio_stream(),
+        )?;
+
+        jobs.extend(tmp.into_iter().map(Into::into));
+
+        jobs.push(Job::ExtractImages {
+            path: file,
+            points: subs
+                .iter()
+                .filter_map(|bundle| {
+                    bundle
+                        .image()
+                        .map(|out_file| (bundle.sub().timespan().start(), out_file))
+                })
+                .collect(),
+            stream_idx: args.video_stream(),
+            sender,
+        });
+
+        for sub in subs {
+            if let (Dialogue::Bitmap(image), Some(path)) = (sub.sub().dialogue(), sub.sub_image()) {
+                jobs.push(Job::WriteImage {
+                    path: path.as_ref(),
+                    image,
+                });
+            }
+        }
     }
 
     trace!("generated {} jobs", jobs.len());
-    jobs.into_par_iter()
-        .map(Job::execute)
-        .collect::<Result<_>>()?;
+
+    std::thread::scope(|s| -> Result<()> {
+        std::iter::repeat(receiver).take(5).for_each(|receiver| {
+            s.spawn(|| match write_images(receiver) {
+                Ok(_) => {
+                    trace!("converted images");
+                }
+                Err(err) => {
+                    error!("failed to convert images: {:?}", err);
+                }
+            });
+        });
+
+        jobs.into_par_iter()
+            .map(Job::execute)
+            .collect::<Result<_>>()
+    })?;
+
     trace!("executed all jobs");
+
+    let notes = create_notes(subtitles.iter().flat_map(|subs| subs.iter()))?;
+    trace!("creates {} notes", notes.len());
+
+    let mut deck = Deck::new(6543, "stos deck", "");
+    trace!("created anki deck");
+
+    for note in notes {
+        deck.add_note(note);
+    }
+
+    let assets = subtitles
+        .iter()
+        .flat_map(|subs| subs.iter())
+        .flat_map(|sub| {
+            let mut assets = Vec::new();
+            if let Some(sub_image) = sub.sub_image() {
+                assets.push(sub_image);
+            }
+            if let Some(image) = sub.image() {
+                assets.push(image);
+            }
+            if let Some(audio) = sub.audio() {
+                assets.push(audio);
+            }
+            assets.into_iter()
+        });
+
+    let mut package =
+        Package::new(vec![deck], assets.collect()).context("Failed to create anki package")?;
+    trace!("created package");
+
+    package
+        .write_to_file("deck.apkg")
+        .context("Failed to write package to file")?;
 
     //read subtitles
     //filter/transform subtitles

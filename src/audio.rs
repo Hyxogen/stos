@@ -11,7 +11,7 @@ use std::process::Command;
 fn generate_audio_command_from_stream<'a, P, I>(path: P, points: I, stream_idx: usize) -> Command
 where
     P: AsRef<Path>,
-    I: Iterator<Item = (Timespan, &'a String)>,
+    I: Iterator<Item = (Timespan, &'a str)>,
 {
     let mut command = Command::new("ffmpeg");
 
@@ -38,13 +38,13 @@ fn generate_audio_commands_from_stream_chunked<'a, P, I>(
 ) -> Vec<Command>
 where
     P: AsRef<Path>,
-    I: Iterator<Item = (Timespan, &'a String)>,
+    I: Iterator<Item = (Timespan, &'a str)>,
 {
     points
         .chunks(chunk_size.into())
         .into_iter()
         .map(|chunk| generate_audio_command_from_stream(&path, chunk, stream_idx))
-        .collect::<Vec<_>>()
+        .collect()
 }
 
 pub fn generate_audio_commands<'a, P, I>(
@@ -54,7 +54,7 @@ pub fn generate_audio_commands<'a, P, I>(
 ) -> Result<Vec<Command>>
 where
     P: AsRef<Path>,
-    I: Iterator<Item = (Timespan, &'a String)>,
+    I: Iterator<Item = (Timespan, &'a str)>,
 {
     let ictx = libav::format::input(&path).context("Failed to open file")?;
     let stream = get_stream(ictx.streams(), media::Type::Audio, stream_idx)?;

@@ -13,6 +13,11 @@ pub struct Args {
 
     gen_audio: bool,
     audio_stream: Option<usize>,
+
+    gen_images: bool,
+    video_stream: Option<usize>,
+    image_width: Option<u32>,
+    image_height: Option<u32>,
 }
 
 impl Default for Args {
@@ -24,6 +29,10 @@ impl Default for Args {
             media_files: Default::default(),
             gen_audio: false,
             audio_stream: Default::default(),
+            gen_images: false,
+            video_stream: Default::default(),
+            image_width: Default::default(),
+            image_height: Default::default(),
         }
     }
 }
@@ -54,6 +63,16 @@ impl Args {
                 }
                 Long("audio-stream") => {
                     args.audio_stream = Some(Self::convert(parser.value()?)?.parse()?)
+                }
+                Short('i') => {
+                    args.gen_images = true;
+                }
+                Long("video-stream") => {
+                    args.video_stream = Some(Self::convert(parser.value()?)?.parse()?)
+                }
+                Long("width") => args.image_width = Some(Self::convert(parser.value()?)?.parse()?),
+                Long("height") => {
+                    args.image_height = Some(Self::convert(parser.value()?)?.parse()?)
                 }
                 Value(file) if taking_media => args.media_files.push(file.into()),
                 Value(file) if !taking_media => args.sub_files.push(file.into()),
@@ -95,5 +114,13 @@ impl Args {
 
     pub fn gen_audio(&self) -> bool {
         self.gen_audio
+    }
+
+    pub fn video_stream(&self) -> Option<usize> {
+        self.video_stream
+    }
+
+    pub fn gen_images(&self) -> bool {
+        self.gen_images
     }
 }
