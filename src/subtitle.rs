@@ -271,11 +271,9 @@ mod av {
         file: &P,
         stream_idx: Option<usize>,
     ) -> Result<Vec<Subtitle>> {
+        let file_str = file.as_ref().to_string_lossy();
         let ictx = libav::format::input(file).context("Failed to open file")?;
-        trace!(
-            "Opened a {} for reading subtitles",
-            file.as_ref().to_string_lossy()
-        );
+        trace!("Opened a {} for reading subtitles", file_str);
 
         read_subtitles(ictx, stream_idx)
     }
@@ -320,6 +318,14 @@ impl Subtitle {
 
     pub fn dialogue(&self) -> &Dialogue {
         &self.diag
+    }
+
+    pub fn text(&self) -> Option<&str> {
+        match self.dialogue() {
+            Dialogue::Text(text) => Some(text),
+            Dialogue::Ass(ass) => Some(&ass.text.dialogue),
+            Dialogue::Bitmap(_) => None,
+        }
     }
 }
 

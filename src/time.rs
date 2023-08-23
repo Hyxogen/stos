@@ -1,8 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Error, Result};
 use libav::mathematics::rescale::Rescale;
 use libav::util::rational::Rational;
 use std::fmt;
 use std::ops::Add;
+use std::str::FromStr;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
 pub struct Timestamp(u64);
@@ -16,6 +17,8 @@ pub struct Timespan {
 
 impl Timestamp {
     const TIMEBASE: Rational = Rational(1, 1000);
+    pub const MIN: Timestamp = Self(u64::MIN);
+    pub const MAX: Timestamp = Self(u64::MAX);
 
     pub fn from_libav_ts(ts: i64, time_base: Rational) -> Result<Self> {
         let ts = ts.rescale(time_base, Self::TIMEBASE);
@@ -29,6 +32,10 @@ impl Timestamp {
         } else {
             Ok(Self(ts.try_into().unwrap()))
         }
+    }
+
+    pub const fn from_secs(secs: u32) -> Self {
+        Self(secs as u64 * 1000u64)
     }
 
     pub const fn as_millis(&self) -> u64 {
@@ -55,6 +62,32 @@ impl fmt::Display for Timestamp {
             (ts / (1000)) % 60,
             ts % 1000
         )
+    }
+}
+
+impl FromStr for Timestamp {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let parts: Vec<&str> = s.split(':').collect();
+
+        match parts[..] {
+            [secs] => Ok(Timestamp::from_secs(secs.parse()?)),
+            [mins, secs] => {
+                let mins: u8 = mins.parse()?;
+                let secs: u8 = secs.parse()?;
+                Ok(Timestamp::from_secs(mins as u32 * 60 + secs as u32))
+            }
+            [hours, mins, secs] => {
+                let hours: u8 = hours.parse()?;
+                let mins: u8 = mins.parse()?;
+                let secs: u8 = secs.parse()?; //TODO better errors
+                Ok(Timestamp::from_secs(
+                    60 * (hours as u32 * 60 + mins as u32) + secs as u32,
+                ))
+            }
+            _ => Err(Error::msg("invalid timestamp")),
+        }
     }
 }
 

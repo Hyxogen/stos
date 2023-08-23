@@ -2,7 +2,7 @@ extern crate ffmpeg_next as libav;
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::{unbounded, Sender};
 use genanki_rs::{Deck, Package};
-use log::{debug, error, trace};
+use log::{error, trace};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
@@ -105,7 +105,13 @@ impl<'a, 'b> Job<'a, 'b> {
                 points,
                 stream_idx,
                 sender,
-            } => extract_images_from_file(path, points.into_iter(), stream_idx, sender),
+            } => extract_images_from_file(path, points.into_iter(), stream_idx, sender)
+                .with_context(|| {
+                    format!(
+                        "Failed to extract images from \"{}\"",
+                        path.to_string_lossy()
+                    )
+                }),
         }
     }
 
@@ -134,7 +140,7 @@ fn run(args: &Args) -> Result<()> {
         args.sub_files()
     };
 
-    if args.sub_files().len() == 0 {
+    if args.sub_files().is_empty() {
         bail!("no subtitle files specified");
     }
     if media_files.len() != args.sub_files().len() {
@@ -143,12 +149,44 @@ fn run(args: &Args) -> Result<()> {
 
     let max_file_width = (media_files.len().ilog10() + 1) as usize;
 
-    let mut subtitles = args
+    let subtitles = args
         .sub_files()
         .iter()
-        .map(|file| read_subtitles_from_file(&file, args.sub_stream()))
-        .map(|result| result.map(|subs| subs.map(Into::into).collect()))
-        .collect::<Result<Vec<Vec<SubtitleBundle>>>>()?;
+        .map(|file| {
+            read_subtitles_from_file(&file, args.sub_stream()).with_context(|| {
+                format!(
+                    "Failed to read subtitles from \"{}\"",
+                    file.to_string_lossy()
+                )
+            })
+        })
+        .map(|result| result.map(|subs| subs.collect()))
+        .collect::<Result<Vec<Vec<Subtitle>>>>()?;
+
+    let mut subtitles: Vec<Vec<SubtitleBundle>> = subtitles
+        .into_iter()
+        .map(|subs| {
+            subs.into_iter()
+                .filter(|sub| sub.timespan().start() >= args.start())
+                .filter(|sub| sub.timespan().start() <= args.end())
+                .filter(|sub| {
+                    !sub.text()
+                        .map(|text| args.blacklist().iter().any(|re| re.is_match(text)))
+                        .unwrap_or(false)
+                })
+                .filter(|sub| {
+                    if args.whitelist().is_empty() {
+                        true
+                    } else {
+                        sub.text()
+                            .map(|text| args.whitelist().iter().any(|re| re.is_match(text)))
+                            .unwrap_or(false)
+                    }
+                })
+                .map(Into::into)
+                .collect()
+        })
+        .collect();
 
     let mut jobs: Vec<Job> = Vec::new();
 
@@ -244,7 +282,7 @@ fn run(args: &Args) -> Result<()> {
     let notes = create_notes(subtitles.iter().flat_map(|subs| subs.iter()))?;
     trace!("creates {} notes", notes.len());
 
-    let mut deck = Deck::new(6543, "stos deck", "");
+    let mut deck = Deck::new(args.deck_id(), args.deck_name(), args.deck_desc());
     trace!("created anki deck");
 
     for note in notes {
@@ -273,7 +311,7 @@ fn run(args: &Args) -> Result<()> {
     trace!("created package");
 
     package
-        .write_to_file("deck.apkg")
+        .write_to_file(args.package())
         .context("Failed to write package to file")?;
 
     //read subtitles

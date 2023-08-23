@@ -42,7 +42,6 @@ where
                     .run(&decoded, &mut rgb_frame)
                     .context("Failed to scale frame")?;
 
-                trace!("{},{}", rgb_frame.width(), rgb_frame.height());
                 if let Some(image) = RgbImage::from_raw(
                     rgb_frame.width(),
                     rgb_frame.height(),
