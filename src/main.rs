@@ -22,7 +22,7 @@ use anki::create_notes;
 use args::Args;
 use audio::generate_audio_commands;
 use subtitle::{read_subtitles_from_file, Dialogue, Subtitle};
-use time::Timestamp;
+use time::{Timespan, Timestamp};
 
 pub struct SubtitleBundle {
     sub: Subtitle,
@@ -241,9 +241,16 @@ fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
         let commands = generate_audio_commands(
             file,
             subs.iter().filter_map(|bundle| {
-                bundle
-                    .audio()
-                    .map(|out_file| (bundle.sub().timespan(), out_file))
+                bundle.audio().map(|out_file| {
+                    let span = bundle.sub().timespan();
+                    (
+                        Timespan::new(
+                            span.start().saturating_sub(args.pad_begin()),
+                            span.end().saturating_add(args.pad_end()),
+                        ),
+                        out_file,
+                    )
+                })
             }),
             args.audio_stream(),
         )?;

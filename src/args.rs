@@ -1,4 +1,4 @@
-use crate::Timestamp;
+use crate::time::{Duration, Timestamp};
 use anyhow::{bail, Context, Result};
 use log::LevelFilter;
 use rand::random;
@@ -33,6 +33,8 @@ fn print_help(executable: &str) {
     println!("    --end TIMESTAMP               Specify until when the program should extract subtitles in hh:mm:ss format.");
     println!("    -a, --audio                   Generate audio snippets for the anki cards.");
     println!("    --audio-stream=INDEX          Select which stream to use to generate the audio snippets.");
+    println!("    --pad-begin=MILLISECONDS      Pad the start time of each audio clip with MILLISECONDS amount.");
+    println!("    --pad-end=MILLISECONDS        Pad the end time of each audio clip with MILLISECONDS amount.");
     println!("    -i, --image                   Generate images for the anki cards.");
     println!(
         "    --video-stream=INDEX          Select which stream to use to generate the images."
@@ -41,7 +43,7 @@ fn print_help(executable: &str) {
     println!("    -c, --coalesce                Merge overlapping audio snippets to one");
     println!("    -b, --blacklist               Do not include subtitles that match this regex (can be used multiple times)");
     println!("    -w, --whitelist               Only include subtitles that match this regex (can be used multiple times)");
-    println!("    --no-deck                     Do not write a anki deck package");
+    println!("    --no-deck                     Do not write an anki deck package");
     println!(
         "    --id=ID                       Specify the id to give the anki deck [default: random]"
     );
@@ -69,6 +71,8 @@ pub struct Args {
 
     gen_audio: bool,
     audio_stream: Option<usize>,
+    pad_begin: Duration,
+    pad_end: Duration,
 
     gen_images: bool,
     video_stream: Option<usize>,
@@ -96,6 +100,8 @@ impl Default for Args {
             media_files: Default::default(),
             gen_audio: false,
             audio_stream: Default::default(),
+            pad_begin: Duration::from_millis(0),
+            pad_end: Duration::from_millis(0),
             gen_images: false,
             video_stream: Default::default(),
             image_width: Default::default(),
@@ -151,6 +157,12 @@ impl Args {
                 }
                 Long("audio-stream") => {
                     args.audio_stream = Some(Self::convert(parser.value()?)?.parse()?)
+                }
+                Long("pad-begin") => {
+                    args.pad_begin = Duration::from_millis(Self::convert_value(&mut parser)?)
+                }
+                Long("pad-end") => {
+                    args.pad_end = Duration::from_millis(Self::convert_value(&mut parser)?)
                 }
                 Short('i') => {
                     args.gen_images = true;
@@ -212,6 +224,13 @@ impl Args {
         }
     }
 
+    fn convert_value<T: std::str::FromStr>(parser: &mut lexopt::Parser) -> Result<T>
+    where
+        <T as std::str::FromStr>::Err: std::error::Error + Sync + Send + 'static,
+    {
+        Ok(Self::convert(parser.value()?)?.parse::<T>()?)
+    }
+
     /*
     pub fn program(&self) -> &str {
         &self.program
@@ -251,6 +270,14 @@ impl Args {
 
     pub fn gen_audio(&self) -> bool {
         self.gen_audio
+    }
+
+    pub fn pad_begin(&self) -> Duration {
+        self.pad_begin
+    }
+
+    pub fn pad_end(&self) -> Duration {
+        self.pad_end
     }
 
     pub fn video_stream(&self) -> Option<usize> {

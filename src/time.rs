@@ -2,7 +2,7 @@ use anyhow::{bail, Error, Result};
 use libav::mathematics::rescale::Rescale;
 use libav::util::rational::Rational;
 use std::fmt;
-use std::ops::Add;
+use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
@@ -41,6 +41,14 @@ impl Timestamp {
     pub const fn as_millis(&self) -> u64 {
         self.0
     }
+
+    pub const fn saturating_add(&self, duration: Duration) -> Self {
+        Self(self.0.saturating_add(duration.as_millis()))
+    }
+
+    pub const fn saturating_sub(&self, duration: Duration) -> Self {
+        Self(self.0.saturating_sub(duration.as_millis()))
+    }
 }
 
 impl Add<Duration> for Timestamp {
@@ -48,6 +56,14 @@ impl Add<Duration> for Timestamp {
 
     fn add(self, d: Duration) -> Self::Output {
         Self(self.0 + d.as_millis())
+    }
+}
+
+impl Sub<Duration> for Timestamp {
+    type Output = Self;
+
+    fn sub(self, d: Duration) -> Self::Output {
+        Self(self.0 - d.as_millis())
     }
 }
 
