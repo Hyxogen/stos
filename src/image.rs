@@ -3,6 +3,7 @@ use crate::util::get_stream;
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::{Receiver, Sender};
 pub use image::{DynamicImage, ImageBuffer, RgbImage, Rgba};
+use indicatif::ProgressBar;
 use libav::codec;
 use libav::codec::decoder;
 use libav::format::context::Input;
@@ -19,6 +20,7 @@ fn extract_images_from_stream<'a, I>(
     mut scaler: scaling::context::Context,
     points: I,
     stream_idx: usize,
+    pb: ProgressBar,
 ) -> Result<()>
 where
     I: Iterator<Item = (Timestamp, &'a str)>,
@@ -48,6 +50,7 @@ where
                     rgb_frame.data(0).to_vec(),
                 ) {
                     while let Some((_, name)) = points.next_if(|(ts, _)| frame_ts >= *ts) {
+                        pb.inc(1);
                         sender
                             .send((name.to_string(), image.clone().into()))
                             .context("Failed to send image")?;
@@ -105,6 +108,7 @@ pub fn extract_images_from_file<'a, P, I>(
     points: I,
     stream_idx: Option<usize>,
     sender: Sender<(String, DynamicImage)>,
+    pb: ProgressBar,
 ) -> Result<()>
 where
     P: AsRef<Path>,
@@ -137,7 +141,7 @@ where
     .context("Failed to create scaler context")?;
 
     trace!("Created sws scaler context");
-    extract_images_from_stream(sender, ictx, decoder, scaler, points, stream_idx)
+    extract_images_from_stream(sender, ictx, decoder, scaler, points, stream_idx, pb)
 }
 
 pub fn write_images(receiver: Receiver<(String, DynamicImage)>) -> Result<()> {

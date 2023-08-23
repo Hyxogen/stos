@@ -1,5 +1,6 @@
 use crate::Timestamp;
 use anyhow::{bail, Context, Result};
+use log::LevelFilter;
 use rand::random;
 use regex::Regex;
 use std::ffi::OsString;
@@ -78,6 +79,8 @@ pub struct Args {
     deck_name: String,
     deck_desc: String,
     package: PathBuf,
+
+    verbosity: LevelFilter,
 }
 
 impl Default for Args {
@@ -101,6 +104,7 @@ impl Default for Args {
             deck_name: DEFAULT_DECK_NAME.to_string(),
             deck_desc: DEFAULT_DECK_DESC.to_string(),
             package: DEFAULT_DECK_FILE.into(),
+            verbosity: LevelFilter::Error,
         }
     }
 }
@@ -168,6 +172,31 @@ impl Args {
                 }
                 Value(file) if taking_media => args.media_files.push(file.into()),
                 Value(file) if !taking_media => args.sub_files.push(file.into()),
+                Short('v') => {
+                    args.verbosity = LevelFilter::Warn;
+
+                    if let Some(val) = parser.optional_value() {
+                        args.verbosity = match val.into_string().as_deref() {
+                            Ok("v") => LevelFilter::Info,
+                            Ok("vv") => LevelFilter::Debug,
+                            Ok("vvv") => LevelFilter::Trace,
+                            Ok(val) => {
+                                eprintln!(
+                                    "\"{}\" is not a valid value for the verbosity flag \"-v\"",
+                                    val
+                                );
+                                std::process::exit(1);
+                            }
+                            Err(val) => {
+                                eprintln!(
+                                    "Failed to parse verbosity option: Invalid unicode: {}",
+                                    val.to_string_lossy()
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
                 _ => todo!(),
             }
         }
@@ -246,5 +275,9 @@ impl Args {
 
     pub fn package(&self) -> &PathBuf {
         &self.package
+    }
+
+    pub fn verbosity(&self) -> LevelFilter {
+        self.verbosity
     }
 }

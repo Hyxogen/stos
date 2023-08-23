@@ -2,7 +2,9 @@ extern crate ffmpeg_next as libav;
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::{unbounded, Sender};
 use genanki_rs::{Deck, Package};
-use log::{error, trace};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif_log_bridge::LogWrapper;
+use log::{error, trace, Log};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
@@ -74,12 +76,16 @@ impl SubtitleBundle {
 }
 
 enum Job<'a, 'b> {
-    Command(std::process::Command),
+    Command {
+        pb: ProgressBar,
+        command: std::process::Command,
+    },
     WriteImage {
         path: &'a std::path::Path,
         image: &'b image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
     },
     ExtractImages {
+        pb: ProgressBar,
         path: &'a PathBuf,
         points: Vec<(Timestamp, &'b str)>,
         stream_idx: Option<usize>,
@@ -87,25 +93,24 @@ enum Job<'a, 'b> {
     },
 }
 
-impl<'a, 'b> From<std::process::Command> for Job<'a, 'b> {
-    fn from(c: std::process::Command) -> Self {
-        Self::Command(c)
-    }
-}
-
 impl<'a, 'b> Job<'a, 'b> {
     pub fn execute(self) -> Result<()> {
         match self {
-            Job::Command(command) => Self::execute_command(command),
+            Job::Command { pb, command } => {
+                Self::execute_command(command)?;
+                pb.inc(1);
+                Ok(())
+            }
             Job::WriteImage { path, image } => {
                 Ok(image.save(path).context("Failed to save image")?)
             }
             Job::ExtractImages {
+                pb,
                 path,
                 points,
                 stream_idx,
                 sender,
-            } => extract_images_from_file(path, points.into_iter(), stream_idx, sender)
+            } => extract_images_from_file(path, points.into_iter(), stream_idx, sender, pb)
                 .with_context(|| {
                     format!(
                         "Failed to extract images from \"{}\"",
@@ -127,7 +132,7 @@ impl<'a, 'b> Job<'a, 'b> {
     }
 }
 
-fn run(args: &Args) -> Result<()> {
+fn run<L: Log + 'static>(args: &Args, logger: L) -> Result<()> {
     trace!(
         "extracting subtitles form {} file(s)",
         args.sub_files().len()
@@ -219,10 +224,21 @@ fn run(args: &Args) -> Result<()> {
 
     let (sender, receiver) = unbounded();
 
+    let m = MultiProgress::new();
+    let style = ProgressStyle::with_template(
+        "{msg:9!} [{elapsed_precise}] {bar:50.cyan/blue} {percent:>4}% [eta {eta:<}]",
+    )
+    .unwrap()
+    .progress_chars("##-");
+    LogWrapper::new(m.clone(), logger).try_init().unwrap();
+    let audio_pb = m.add(ProgressBar::new(0));
+    audio_pb.set_message("audio");
+    audio_pb.set_style(style.clone());
+
     for (sender, (file, subs)) in
         std::iter::repeat(sender).zip(media_files.iter().zip(subtitles.iter()))
     {
-        let tmp = generate_audio_commands(
+        let commands = generate_audio_commands(
             file,
             subs.iter().filter_map(|bundle| {
                 bundle
@@ -231,10 +247,21 @@ fn run(args: &Args) -> Result<()> {
             }),
             args.audio_stream(),
         )?;
+        audio_pb.inc_length(commands.len().try_into().unwrap());
 
-        jobs.extend(tmp.into_iter().map(Into::into));
+        for command in commands {
+            jobs.push(Job::Command {
+                pb: audio_pb.clone(),
+                command,
+            });
+        }
+        //jobs.extend(tmp.into_iter().map(Into::into));
+        let image_pb = m.add(ProgressBar::new(subs.len().try_into().unwrap()));
+        image_pb.set_style(style.clone());
+        image_pb.set_message(file.file_stem().unwrap().to_string_lossy().to_string());
 
         jobs.push(Job::ExtractImages {
+            pb: image_pb.clone(),
             path: file,
             points: subs
                 .iter()
@@ -276,6 +303,8 @@ fn run(args: &Args) -> Result<()> {
             .map(Job::execute)
             .collect::<Result<_>>()
     })?;
+
+    audio_pb.finish_with_message("done");
 
     trace!("executed all jobs");
 
@@ -322,16 +351,17 @@ fn run(args: &Args) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    pretty_env_logger::formatted_builder()
-        .filter_level(log::LevelFilter::Trace)
-        .init();
-
     let args = Args::parse_from_env()?;
+
+    let logger = pretty_env_logger::formatted_builder()
+        .filter_level(args.verbosity())
+        .build();
+    trace!("initialized logger");
     //execute
 
     libav::init().context("Failed to initialize libav")?;
 
-    run(&args)?;
+    run(&args, logger)?;
     /*
     if let Err(error) = run() {
         //print pretty error
