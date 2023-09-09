@@ -6,9 +6,9 @@ use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
-pub struct Timestamp(u64);
+pub struct Timestamp(i64);
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
-pub struct Duration(u64);
+pub struct Duration(i64);
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
 pub struct Timespan {
     start: Timestamp,
@@ -17,8 +17,8 @@ pub struct Timespan {
 
 impl Timestamp {
     const TIMEBASE: Rational = Rational(1, 1000);
-    pub const MIN: Timestamp = Self(u64::MIN);
-    pub const MAX: Timestamp = Self(u64::MAX);
+    pub const MIN: Timestamp = Self(0);
+    pub const MAX: Timestamp = Self(i64::MAX);
 
     pub fn from_libav_ts(ts: i64, time_base: Rational) -> Result<Self> {
         let ts = ts.rescale(time_base, Self::TIMEBASE);
@@ -30,24 +30,28 @@ impl Timestamp {
         } else if ts < 0 {
             bail!("Negative timestamp");
         } else {
-            Ok(Self(ts.try_into().unwrap()))
+            Ok(Self(ts))
         }
     }
 
-    pub const fn from_secs(secs: u32) -> Self {
-        Self(secs as u64 * 1000u64)
+    pub const fn from_millis(millis: u32) -> Self {
+        Self(millis as i64)
     }
 
-    pub const fn as_millis(&self) -> u64 {
+    pub const fn from_secs(secs: u32) -> Self {
+        Self(secs as i64 * 1000i64)
+    }
+
+    pub const fn as_millis(&self) -> i64 {
         self.0
     }
 
-    pub const fn saturating_add(&self, duration: Duration) -> Self {
-        Self(self.0.saturating_add(duration.as_millis()))
+    pub fn saturating_add(&self, duration: Duration) -> Self {
+        Self(self.0.saturating_add(duration.as_millis()).max(0))
     }
 
-    pub const fn saturating_sub(&self, duration: Duration) -> Self {
-        Self(self.0.saturating_sub(duration.as_millis()))
+    pub fn saturating_sub(&self, duration: Duration) -> Self {
+        Self(self.0.saturating_sub(duration.as_millis()).max(0))
     }
 }
 
@@ -108,11 +112,11 @@ impl FromStr for Timestamp {
 }
 
 impl Duration {
-    pub const fn from_millis(millis: u64) -> Duration {
+    pub const fn from_millis(millis: i64) -> Duration {
         Self(millis)
     }
 
-    pub const fn as_millis(&self) -> u64 {
+    pub const fn as_millis(&self) -> i64 {
         self.0
     }
 }
@@ -137,5 +141,52 @@ impl Timespan {
 impl From<Timespan> for (Timestamp, Timestamp) {
     fn from(span: Timespan) -> Self {
         (span.start(), span.end())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saturating_add_normal() {
+        let ts = Timestamp::from_millis(0);
+        assert_eq!(
+            ts.saturating_add(Duration::from_millis(1)),
+            Timestamp::from_millis(1)
+        );
+    }
+
+    #[test]
+    fn saturating_add_underflow() {
+        let ts = Timestamp::MIN;
+        assert_eq!(ts.saturating_add(Duration::from_millis(-1)), Timestamp::MIN);
+    }
+
+    #[test]
+    fn saturating_add_overflow() {
+        let ts = Timestamp::MAX;
+        assert_eq!(ts.saturating_add(Duration::from_millis(1)), Timestamp::MAX);
+    }
+
+    #[test]
+    fn saturating_sub_normal() {
+        let ts = Timestamp::from_millis(1);
+        assert_eq!(
+            ts.saturating_sub(Duration::from_millis(1)),
+            Timestamp::from_millis(0)
+        );
+    }
+
+    #[test]
+    fn saturating_sub_underflow() {
+        let ts = Timestamp::MIN;
+        assert_eq!(ts.saturating_sub(Duration::from_millis(1)), Timestamp::MIN);
+    }
+
+    #[test]
+    fn saturating_sub_overflow() {
+        let ts = Timestamp::MAX;
+        assert_eq!(ts.saturating_sub(Duration::from_millis(-1)), Timestamp::MAX);
     }
 }
