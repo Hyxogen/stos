@@ -284,8 +284,12 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
                     let span = bundle.sub().timespan();
                     (
                         Timespan::new(
-                            span.start().saturating_sub(args.pad_begin()),
-                            span.end().saturating_add(args.pad_end()),
+                            span.start()
+                                .saturating_sub(args.pad_begin())
+                                .saturating_add(args.shift_audio()),
+                            span.end()
+                                .saturating_add(args.pad_end())
+                                .saturating_add(args.shift_audio()),
                         ),
                         out_file,
                     )
@@ -302,24 +306,27 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
             });
         }
         //jobs.extend(tmp.into_iter().map(Into::into));
-        let image_pb = multi.add(ProgressBar::new(subs.len().try_into().unwrap()));
-        image_pb.set_style(style.clone());
-        image_pb.set_message(file.file_stem().unwrap().to_string_lossy().to_string());
 
-        jobs.push(Job::ExtractImages {
-            pb: image_pb.clone(),
-            path: file,
-            points: subs
-                .iter()
-                .filter_map(|bundle| {
-                    bundle
-                        .image()
-                        .map(|out_file| (bundle.sub().timespan().start(), out_file))
-                })
-                .collect(),
-            stream_idx: args.video_stream(),
-            sender,
-        });
+        if args.gen_images() {
+            let image_pb = multi.add(ProgressBar::new(subs.len().try_into().unwrap()));
+            image_pb.set_style(style.clone());
+            image_pb.set_message(file.file_stem().unwrap().to_string_lossy().to_string());
+
+            jobs.push(Job::ExtractImages {
+                pb: image_pb.clone(),
+                path: file,
+                points: subs
+                    .iter()
+                    .filter_map(|bundle| {
+                        bundle
+                            .image()
+                            .map(|out_file| (bundle.sub().timespan().start(), out_file))
+                    })
+                    .collect(),
+                stream_idx: args.video_stream(),
+                sender,
+            });
+        }
 
         for sub in subs {
             if let (Dialogue::Bitmap(image), Some(path)) = (sub.sub().dialogue(), sub.sub_image()) {
@@ -389,9 +396,13 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
         Package::new(vec![deck], assets.collect()).context("Failed to create anki package")?;
     trace!("created package");
 
-    package
-        .write_to_file(args.package())
-        .context("Failed to write package to file")?;
+    if !args.no_deck() {
+        package
+            .write_to_file(args.package())
+            .context("Failed to write package to file")?;
+    } else {
+        trace!("did not write an anki deck because --no-deck was specified");
+    }
 
     //read subtitles
     //filter/transform subtitles
