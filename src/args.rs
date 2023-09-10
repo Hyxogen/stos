@@ -38,6 +38,7 @@ fn print_help(executable: &str) {
     println!("    --max-dist=MILLISECONDS       Used only with `--merge`. Will not merge subtitles that are more than MILLISECONDS apart [default: {}]", DEFAULT_MERGE_DIST);
     println!("    -a, --audio                   Generate audio snippets for the anki cards");
     println!("    --audio-stream=INDEX          Select which stream to use to generate the audio snippets");
+    println!("    --audio-lang-stream=LANGUAGE  Select which stream to use to generate the audio snippets by language");
     println!("    --pad-begin=MILLISECONDS      Pad the start time of each audio clip with MILLISECONDS amount");
     println!("    --pad-end=MILLISECONDS        Pad the end time of each audio clip with MILLISECONDS amount");
     println!("    --shift-audio=MILLISECONDS    Shift the audio timings by MILLISECONDS amount");
