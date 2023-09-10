@@ -1,7 +1,13 @@
 [package]
 name = "stos"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+authors = ["Hyxogen"]
+license = "MIT"
+homepage = "https://github.com/Hyxogen/stos"
+repository = "https://github.com/Hyxogen/stos"
+keywords = ["anki", "subs2srs", "srs"]
+categories = ["command-line-utilities", "multimedia"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,6 +16,7 @@ anyhow = "1.0.72"
 crossbeam-channel = "0.5.8"
 ffmpeg-next = "6.0.0"
 genanki-rs = { git = "https://github.com/Hyxogen/genanki-rs.git", version = "0.3.1" }
+human-panic = "1.2.0"
 image = "0.24.6"
 indicatif = "0.17.6"
 indicatif-log-bridge = "0.2.1"

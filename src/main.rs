@@ -2,6 +2,7 @@ extern crate ffmpeg_next as libav;
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::{unbounded, Sender};
 use genanki_rs::{Deck, Package};
+use human_panic::setup_panic;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use log::{error, trace, warn};
@@ -427,6 +428,8 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    setup_panic!();
+
     let args = Args::parse_from_env()?;
 
     let logger = pretty_env_logger::formatted_builder()
@@ -438,6 +441,7 @@ fn main() -> Result<()> {
     trace!("initialized logger");
     //execute
 
+    panic!();
     libav::init().context("Failed to initialize libav")?;
 
     run(&args, multi.clone())?;
