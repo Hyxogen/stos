@@ -249,7 +249,7 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
         .map(|(file_idx, subs)| {
             let mut audio_files: Vec<(Timespan, String)> = Vec::new();
 
-            if subs.is_empty() {
+            if subs.is_empty() || !args.gen_audio() {
                 return audio_files;
             }
 
