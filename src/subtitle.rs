@@ -255,11 +255,6 @@ mod av {
 
     fn read_subtitles(ictx: Input, selector: StreamSelector<'_>) -> Result<Vec<Subtitle>> {
         let stream = get_stream(ictx.streams(), media::Type::Subtitle, selector)?;
-
-        for tmp in &stream.metadata() {
-            trace!("{:?}", tmp);
-        }
-
         let stream_idx = stream.index();
         trace!(
             "Using {} stream at index {}",
