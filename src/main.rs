@@ -207,6 +207,13 @@ fn process_subtitles(args: &Args, subs: Vec<Subtitle>) -> Vec<SubtitleBundle> {
                     .unwrap_or(false)
             }
         })
+        .filter(|sub| {
+            if let Dialogue::Ass(ass) = sub.dialogue() {
+                !args.ignore_styled() || !ass.text.is_styled()
+            } else {
+                true
+            }
+        })
         .map(Into::into)
         .collect()
 }

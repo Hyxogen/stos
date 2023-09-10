@@ -28,6 +28,7 @@ impl std::error::Error for AssError {}
 pub struct AssText {
     pub text: String,
     pub dialogue: String,
+    styled: bool,
 }
 
 impl FromStr for AssText {
@@ -37,9 +38,11 @@ impl FromStr for AssText {
         let mut escaped = false;
         let mut brackets: u64 = 0;
         let mut dialogue = String::new();
+        let mut styled = false;
 
         for ch in s.chars() {
             if ch == '{' {
+                styled = true;
                 brackets += 1;
             } else if ch == '}' {
                 if brackets > 0 {
@@ -66,7 +69,14 @@ impl FromStr for AssText {
         Ok(Self {
             text: s.to_string(),
             dialogue,
+            styled,
         })
+    }
+}
+
+impl AssText {
+    pub fn is_styled(&self) -> bool {
+        self.styled
     }
 }
 

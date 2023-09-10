@@ -34,6 +34,7 @@ fn print_help(executable: &str) {
     println!("    --sub-lang=LANGUAGE           Select which stream to use form SUBTITLE_FILE as the subtitle stream by language");
     println!("    --start TIMESTAMP             Specify from when the program should extract subtitles in hh:mm:ss format");
     println!("    --end TIMESTAMP               Specify until when the program should extract subtitles in hh:mm:ss format");
+    println!("    --ignore-styled               Ignore subtitle texts that have been styled (only for ass format)");
     println!("    --merge                       Merge nearby subtitles that are the same into one. See `--max-dist`");
     println!("    --max-dist=MILLISECONDS       Used only with `--merge`. Will not merge subtitles that are more than MILLISECONDS apart [default: {}]", DEFAULT_MERGE_DIST);
     println!("    -a, --audio                   Generate audio snippets for the anki cards");
@@ -73,6 +74,7 @@ pub struct Args {
 
     blacklist: Vec<Regex>,
     whitelist: Vec<Regex>,
+    ignore_styled: bool,
 
     merge: bool,
     merge_diff: Duration,
@@ -116,6 +118,7 @@ impl Default for Args {
             end: Timestamp::MAX,
             blacklist: Default::default(),
             whitelist: Default::default(),
+            ignore_styled: true,
             merge: false,
             merge_diff: Duration::from_millis(DEFAULT_MERGE_DIST),
             media_files: Default::default(),
@@ -193,6 +196,9 @@ impl Args {
                     let re = Self::convert(parser.value()?)?;
                     args.whitelist
                         .push(Regex::new(&re).context("Failed to compile regex for whitelist")?)
+                }
+                Long("ignore-styled") => {
+                    args.ignore_styled = true;
                 }
                 Long("merge") => {
                     args.merge = true;
@@ -353,6 +359,10 @@ impl Args {
 
     pub fn whitelist(&self) -> &Vec<Regex> {
         &self.whitelist
+    }
+
+    pub fn ignore_styled(&self) -> bool {
+        self.ignore_styled
     }
 
     pub fn merge_subs(&self) -> bool {
