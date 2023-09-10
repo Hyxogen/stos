@@ -96,6 +96,16 @@ fn no_deck() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn lang_and_index_fail() -> TestResult {
+    Command::cargo_bin("stos")?
+        .arg("--sub-lang eng")
+        .arg("--sub-stream 1")
+        .assert()
+        .failure();
+    Ok(())
+}
+
 /*
 #[test]
 fn subs_and_video() -> TestResult {
