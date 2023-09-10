@@ -243,6 +243,61 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
         warn!("All subtitles were ignored due to filter specified");
     }
 
+    let audio_files: Vec<Vec<(Timespan, String)>> = subtitles
+        .iter_mut()
+        .enumerate()
+        .map(|(file_idx, subs)| {
+            let mut audio_files: Vec<(Timespan, String)> = Vec::new();
+
+            if subs.is_empty() {
+                return audio_files;
+            }
+
+            let max_index = subs.len();
+            let max_width: usize = (max_index.ilog10() + 1) as usize;
+            let mut sub_idx = 0usize;
+            let count_before = subs.len();
+
+            for sub in subs {
+                let sub_span = sub.sub().timespan();
+                let sub_span = Timespan::new(
+                    sub_span
+                        .start()
+                        .saturating_sub(args.pad_begin())
+                        .saturating_add(args.shift_audio()),
+                    sub_span
+                        .end()
+                        .saturating_add(args.pad_end())
+                        .saturating_add(args.shift_audio()),
+                );
+
+                if args.join_audio() {
+                    if let Some((span, name)) = audio_files.last_mut() {
+                        if span.end() >= sub_span.start() {
+                            *span = Timespan::new(span.start(), sub_span.end());
+                            sub.set_audio(name);
+                            continue;
+                        }
+                    }
+                }
+
+                let file_name = format!(
+                    "audio_{:0max_file_width$}_{:0max_width$}.mka",
+                    file_idx, sub_idx
+                );
+                sub.set_audio(&file_name);
+                audio_files.push((sub_span, file_name));
+                sub_idx += 1;
+            }
+            trace!(
+                "joined {} audio files into {}",
+                count_before,
+                audio_files.len()
+            );
+            audio_files
+        })
+        .collect();
+
     let mut jobs: Vec<Job> = Vec::new();
 
     for (file_idx, subs) in subtitles.iter_mut().enumerate() {
@@ -261,12 +316,14 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
                 ));
             }
 
+            /*
             if args.gen_audio() {
                 sub.set_audio(&format!(
                     "audio_{:0max_file_width$}_{:0max_width$}.mka",
                     file_idx, sub_idx
                 ));
-            }
+            }*/
+
             if args.gen_images() {
                 sub.set_image(&format!(
                     "image_{:0max_file_width$}_{:0max_width$}.jpg",
@@ -287,28 +344,14 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
     audio_pb.set_message("audio");
     audio_pb.set_style(style.clone());
 
-    for (sender, (file, subs)) in
-        std::iter::repeat(sender).zip(media_files.iter().zip(subtitles.iter()))
+    for (idx, (sender, (file, subs))) in std::iter::repeat(sender)
+        .zip(media_files.iter().zip(subtitles.iter()))
+        .enumerate()
     {
         if args.gen_audio() {
             let commands = generate_audio_commands(
                 file,
-                subs.iter().filter_map(|bundle| {
-                    bundle.audio().map(|out_file| {
-                        let span = bundle.sub().timespan();
-                        (
-                            Timespan::new(
-                                span.start()
-                                    .saturating_sub(args.pad_begin())
-                                    .saturating_add(args.shift_audio()),
-                                span.end()
-                                    .saturating_add(args.pad_end())
-                                    .saturating_add(args.shift_audio()),
-                            ),
-                            out_file,
-                        )
-                    })
-                }),
+                audio_files[idx].iter().map(|(a, b)| (*a, b.as_ref())),
                 args.audio_stream(),
             )?;
             audio_pb.inc_length(commands.len().try_into().unwrap());

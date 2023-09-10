@@ -39,6 +39,7 @@ fn print_help(executable: &str) {
     println!("    --pad-begin=MILLISECONDS      Pad the start time of each audio clip with MILLISECONDS amount");
     println!("    --pad-end=MILLISECONDS        Pad the end time of each audio clip with MILLISECONDS amount");
     println!("    --shift-audio=MILLISECONDS    Shift the audio timings by MILLISECONDS amount");
+    println!("    --join-audio                  Join overlapping audio into one clip");
     println!("    -i, --image                   Generate images for the anki cards");
     println!("    --video-stream=INDEX          Select which stream to use to generate the images");
     println!("    -m, --media                   Specify media files from which to generate the audio snippets `-a` and/or images `-i`");
@@ -80,6 +81,7 @@ pub struct Args {
     pad_begin: Duration,
     pad_end: Duration,
     shift_audio: Duration,
+    join_audio: bool,
 
     gen_images: bool,
     video_stream: Option<usize>,
@@ -115,6 +117,7 @@ impl Default for Args {
             pad_begin: Duration::from_millis(0),
             pad_end: Duration::from_millis(0),
             shift_audio: Duration::from_millis(0),
+            join_audio: false,
             gen_images: false,
             video_stream: Default::default(),
             image_width: Default::default(),
@@ -191,6 +194,9 @@ impl Args {
                 }
                 Long("shift-audio") => {
                     args.shift_audio = Duration::from_millis(Self::convert_value(&mut parser)?)
+                }
+                Long("join-audio") => {
+                    args.join_audio = true;
                 }
                 Short('i') => {
                     args.gen_images = true;
@@ -339,6 +345,10 @@ impl Args {
 
     pub fn shift_audio(&self) -> Duration {
         self.shift_audio
+    }
+
+    pub fn join_audio(&self) -> bool {
+        self.join_audio
     }
 
     pub fn video_stream(&self) -> Option<usize> {
