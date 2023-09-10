@@ -26,6 +26,9 @@ where
     I: Iterator<Item = (Timestamp, &'a str)>,
 {
     let mut points = points.peekable();
+
+    //This unwrap will never fail, since the stream_idx was checked before in
+    //extract_images_from_file
     let time_base = ictx.streams().nth(stream_idx).unwrap().time_base();
 
     let mut receive_and_process_frame = |decoder: &mut decoder::video::Video| -> Result<bool> {

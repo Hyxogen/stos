@@ -33,6 +33,6 @@ pub fn get_stream(
     } else if let Some(stream) = streams.best(medium) {
         Ok(stream)
     } else {
-        bail!("File does not have a `{}` stream", get_medium_name(medium));
+        bail!("File does not have a {} stream", get_medium_name(medium));
     }
 }

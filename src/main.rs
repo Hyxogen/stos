@@ -4,7 +4,7 @@ use crossbeam_channel::{unbounded, Sender};
 use genanki_rs::{Deck, Package};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
-use log::{error, trace};
+use log::{error, trace, warn};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -209,6 +209,10 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
         subtitles
     };
 
+    if subtitles.iter().all(|arr| arr.is_empty()) {
+        warn!("No subtitles extracted");
+    }
+
     let mut subtitles: Vec<Vec<SubtitleBundle>> = subtitles
         .into_iter()
         .map(|subs| {
@@ -234,9 +238,17 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
         })
         .collect();
 
+    if subtitles.iter().all(|arr| arr.is_empty()) {
+        warn!("All subtitles were ignored due to filter specified");
+    }
+
     let mut jobs: Vec<Job> = Vec::new();
 
     for (file_idx, subs) in subtitles.iter_mut().enumerate() {
+        if subs.is_empty() {
+            continue;
+        }
+
         let max_index = subs.len();
         let max_width: usize = (max_index.ilog10() + 1) as usize;
 
@@ -277,34 +289,37 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
     for (sender, (file, subs)) in
         std::iter::repeat(sender).zip(media_files.iter().zip(subtitles.iter()))
     {
-        let commands = generate_audio_commands(
-            file,
-            subs.iter().filter_map(|bundle| {
-                bundle.audio().map(|out_file| {
-                    let span = bundle.sub().timespan();
-                    (
-                        Timespan::new(
-                            span.start()
-                                .saturating_sub(args.pad_begin())
-                                .saturating_add(args.shift_audio()),
-                            span.end()
-                                .saturating_add(args.pad_end())
-                                .saturating_add(args.shift_audio()),
-                        ),
-                        out_file,
-                    )
-                })
-            }),
-            args.audio_stream(),
-        )?;
-        audio_pb.inc_length(commands.len().try_into().unwrap());
+        if args.gen_audio() {
+            let commands = generate_audio_commands(
+                file,
+                subs.iter().filter_map(|bundle| {
+                    bundle.audio().map(|out_file| {
+                        let span = bundle.sub().timespan();
+                        (
+                            Timespan::new(
+                                span.start()
+                                    .saturating_sub(args.pad_begin())
+                                    .saturating_add(args.shift_audio()),
+                                span.end()
+                                    .saturating_add(args.pad_end())
+                                    .saturating_add(args.shift_audio()),
+                            ),
+                            out_file,
+                        )
+                    })
+                }),
+                args.audio_stream(),
+            )?;
+            audio_pb.inc_length(commands.len().try_into().unwrap());
 
-        for command in commands {
-            jobs.push(Job::Command {
-                pb: audio_pb.clone(),
-                command,
-            });
+            for command in commands {
+                jobs.push(Job::Command {
+                    pb: audio_pb.clone(),
+                    command,
+                });
+            }
         }
+
         //jobs.extend(tmp.into_iter().map(Into::into));
 
         if args.gen_images() {
