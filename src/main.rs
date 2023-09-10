@@ -441,7 +441,6 @@ fn main() -> Result<()> {
     trace!("initialized logger");
     //execute
 
-    panic!();
     libav::init().context("Failed to initialize libav")?;
 
     run(&args, multi.clone())?;

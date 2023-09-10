@@ -77,7 +77,7 @@ mod av {
                 ))
             } else if av_sub.duration > 0 {
                 //TODO check if packet.duration() is in millis or in timebase
-                Some(Duration::from_millis(av_sub.duration.try_into().unwrap()))
+                Some(Duration::from_millis(av_sub.duration))
             } else {
                 None
             };
