@@ -1,5 +1,5 @@
 use crate::time::Timestamp;
-use crate::util::get_stream;
+use crate::util::{get_stream, StreamSelector};
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::{Receiver, Sender};
 pub use image::{DynamicImage, ImageBuffer, RgbImage, Rgba};
@@ -109,7 +109,7 @@ fn create_decoder(params: codec::parameters::Parameters) -> Result<decoder::vide
 pub fn extract_images_from_file<'a, P, I>(
     file: P,
     points: I,
-    stream_idx: Option<usize>,
+    selector: StreamSelector<'_>,
     sender: Sender<(String, DynamicImage)>,
     pb: ProgressBar,
 ) -> Result<()>
@@ -118,7 +118,7 @@ where
     I: Iterator<Item = (Timestamp, &'a str)>,
 {
     let ictx = libav::format::input(&file).context("Failed to open file")?;
-    let stream = get_stream(ictx.streams(), media::Type::Video, stream_idx)?;
+    let stream = get_stream(ictx.streams(), media::Type::Video, selector)?;
     let stream_idx = stream.index();
     trace!(
         "Using {} stream at index {}",

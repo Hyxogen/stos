@@ -25,6 +25,7 @@ use args::Args;
 use audio::generate_audio_commands;
 use subtitle::{read_subtitles_from_file, Dialogue, Subtitle};
 use time::{Duration, Timespan, Timestamp};
+use util::StreamSelector;
 
 pub struct SubtitleBundle {
     sub: Subtitle,
@@ -77,7 +78,7 @@ impl SubtitleBundle {
     }
 }
 
-enum Job<'a, 'b> {
+enum Job<'a, 'b, 'c> {
     Command {
         pb: ProgressBar,
         command: std::process::Command,
@@ -90,12 +91,12 @@ enum Job<'a, 'b> {
         pb: ProgressBar,
         path: &'a PathBuf,
         points: Vec<(Timestamp, &'b str)>,
-        stream_idx: Option<usize>,
+        selector: StreamSelector<'c>,
         sender: Sender<(String, image::DynamicImage)>,
     },
 }
 
-impl<'a, 'b> Job<'a, 'b> {
+impl<'a, 'b, 'c> Job<'a, 'b, 'c> {
     pub fn execute(self) -> Result<()> {
         match self {
             Job::Command { pb, command } => {
@@ -110,9 +111,9 @@ impl<'a, 'b> Job<'a, 'b> {
                 pb,
                 path,
                 points,
-                stream_idx,
+                selector,
                 sender,
-            } => extract_images_from_file(path, points.into_iter(), stream_idx, sender, pb)
+            } => extract_images_from_file(path, points.into_iter(), selector, sender, pb)
                 .with_context(|| {
                     format!(
                         "Failed to extract images from \"{}\"",
@@ -163,11 +164,11 @@ where
     result
 }
 
-fn read_subtitles(files: &Vec<PathBuf>, sub_stream: Option<usize>) -> Result<Vec<Vec<Subtitle>>> {
-    files
+fn read_subtitles(args: &Args) -> Result<Vec<Vec<Subtitle>>> {
+    args.sub_files()
         .iter()
         .map(|file| {
-            read_subtitles_from_file(&file, sub_stream).with_context(|| {
+            read_subtitles_from_file(&file, args.sub_stream_selector()).with_context(|| {
                 format!(
                     "Failed to read subtitles from \"{}\"",
                     file.to_string_lossy()
@@ -230,7 +231,7 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
 
     let max_file_width = (media_files.len().ilog10() + 1) as usize;
 
-    let subtitles = read_subtitles(args.sub_files(), args.sub_stream())?;
+    let subtitles = read_subtitles(args)?;
     let mut subtitles: Vec<Vec<SubtitleBundle>> = subtitles
         .into_iter()
         .map(|subs| process_subtitles(args, subs))
@@ -341,7 +342,7 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
             let commands = generate_audio_commands(
                 file,
                 audio_files[idx].iter().map(|(a, b)| (*a, b.as_ref())),
-                args.audio_stream(),
+                args.audio_stream_selector(),
             )?;
             audio_pb.inc_length(commands.len().try_into().unwrap());
 
@@ -371,7 +372,7 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
                             .map(|out_file| (bundle.sub().timespan().start(), out_file))
                     })
                     .collect(),
-                stream_idx: args.video_stream(),
+                selector: args.video_stream_selector(),
                 sender,
             });
         }

@@ -1,4 +1,5 @@
 use crate::time::{Duration, Timestamp};
+use crate::util::StreamSelector;
 use anyhow::{bail, Context, Result};
 use log::LevelFilter;
 use rand::random;
@@ -30,6 +31,7 @@ fn print_help(executable: &str) {
     println!("    -v                            Increase verbosity of program logs");
     println!("    -o FILE, --output=FILE        Specify the file to write the anki deck to [default: {}]", DEFAULT_DECK_FILE);
     println!("    -s INDEX, --sub-stream=INDEX  Select which stream to use from SUBTITLE_FILE as the subtitle stream");
+    println!("    --sub-lang=LANGUAGE           Select which stream to use form SUBTITLE_FILE as the subtitle stream by language");
     println!("    --start TIMESTAMP             Specify from when the program should extract subtitles in hh:mm:ss format");
     println!("    --end TIMESTAMP               Specify until when the program should extract subtitles in hh:mm:ss format");
     println!("    --merge                       Merge nearby subtitles that are the same into one. See `--max-dist`");
@@ -64,6 +66,7 @@ pub struct Args {
 
     sub_files: Vec<PathBuf>,
     sub_stream: Option<usize>,
+    sub_lang: Option<String>,
 
     start: Timestamp,
     end: Timestamp,
@@ -78,6 +81,7 @@ pub struct Args {
 
     gen_audio: bool,
     audio_stream: Option<usize>,
+    audio_lang: Option<String>,
     pad_begin: Duration,
     pad_end: Duration,
     shift_audio: Duration,
@@ -105,6 +109,7 @@ impl Default for Args {
             program: env!("CARGO_PKG_NAME").to_string(),
             sub_files: Default::default(),
             sub_stream: Default::default(),
+            sub_lang: Default::default(),
             start: Timestamp::MIN,
             end: Timestamp::MAX,
             blacklist: Default::default(),
@@ -114,6 +119,7 @@ impl Default for Args {
             media_files: Default::default(),
             gen_audio: false,
             audio_stream: Default::default(),
+            audio_lang: Default::default(),
             pad_begin: Duration::from_millis(0),
             pad_end: Duration::from_millis(0),
             shift_audio: Duration::from_millis(0),
@@ -160,7 +166,18 @@ impl Args {
                     taking_media = true;
                 }
                 Short('s') | Long("sub-stream") => {
+                    if args.sub_lang.is_some() {
+                        eprintln!("--sub-stream and --sub-lang cannot be use at the same time");
+                        std::process::exit(1);
+                    }
                     args.sub_stream = Some(Self::convert(parser.value()?)?.parse()?)
+                }
+                Long("sub-lang") => {
+                    if args.sub_stream.is_some() {
+                        eprintln!("--sub-stream and --sub-lang cannot be use at the same time");
+                        std::process::exit(1);
+                    }
+                    args.sub_lang = Some(Self::convert(parser.value()?)?.parse()?)
                 }
                 Long("start") => args.start = Self::convert(parser.value()?)?.parse()?,
                 Long("end") => args.end = Self::convert(parser.value()?)?.parse()?,
@@ -184,7 +201,18 @@ impl Args {
                     args.gen_audio = true;
                 }
                 Long("audio-stream") => {
+                    if args.audio_lang.is_some() {
+                        eprintln!("--audio-stream and --audio-lang cannot be use at the same time");
+                        std::process::exit(1);
+                    }
                     args.audio_stream = Some(Self::convert(parser.value()?)?.parse()?)
+                }
+                Long("audio-lang") => {
+                    if args.audio_stream.is_some() {
+                        eprintln!("--audio-stream and --audio-lang cannot be use at the same time");
+                        std::process::exit(1);
+                    }
+                    args.audio_lang = Some(Self::convert(parser.value()?)?.parse()?)
                 }
                 Long("pad-begin") => {
                     args.pad_begin = Duration::from_millis(Self::convert_value(&mut parser)?)
@@ -295,8 +323,14 @@ impl Args {
         &self.sub_files
     }
 
-    pub fn sub_stream(&self) -> Option<usize> {
-        self.sub_stream
+    pub fn sub_stream_selector(&self) -> StreamSelector {
+        if let Some(stream_idx) = self.sub_stream {
+            StreamSelector::Index(stream_idx)
+        } else if let Some(sub_lang) = self.sub_lang.as_deref() {
+            StreamSelector::Language(sub_lang)
+        } else {
+            StreamSelector::Best
+        }
     }
 
     pub fn start(&self) -> Timestamp {
@@ -327,8 +361,14 @@ impl Args {
         &self.media_files
     }
 
-    pub fn audio_stream(&self) -> Option<usize> {
-        self.audio_stream
+    pub fn audio_stream_selector(&self) -> StreamSelector {
+        if let Some(stream_idx) = self.audio_stream {
+            StreamSelector::Index(stream_idx)
+        } else if let Some(audio_lang) = self.audio_lang.as_deref() {
+            StreamSelector::Language(audio_lang)
+        } else {
+            StreamSelector::Best
+        }
     }
 
     pub fn gen_audio(&self) -> bool {
@@ -351,8 +391,12 @@ impl Args {
         self.join_audio
     }
 
-    pub fn video_stream(&self) -> Option<usize> {
-        self.video_stream
+    pub fn video_stream_selector(&self) -> StreamSelector {
+        if let Some(stream_idx) = self.video_stream {
+            StreamSelector::Index(stream_idx)
+        } else {
+            StreamSelector::Best
+        }
     }
 
     pub fn gen_images(&self) -> bool {

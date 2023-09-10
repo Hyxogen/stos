@@ -1,5 +1,6 @@
 use crate::ass::DialogueEvent;
 use crate::time::Timespan;
+use crate::util::StreamSelector;
 use anyhow::Result;
 use image::RgbaImage;
 use std::path::Path;
@@ -7,7 +8,7 @@ use std::path::Path;
 mod av {
     use crate::ass::DialogueEvent;
     use crate::time::{Duration, Timestamp};
-    use crate::util::get_stream;
+    use crate::util::{get_stream, StreamSelector};
     use anyhow::{bail, Context, Error, Result};
     use image::RgbaImage;
     use libav::codec;
@@ -251,8 +252,13 @@ mod av {
         Ok(subs)
     }
 
-    fn read_subtitles(ictx: Input, stream_idx: Option<usize>) -> Result<Vec<Subtitle>> {
-        let stream = get_stream(ictx.streams(), media::Type::Subtitle, stream_idx)?;
+    fn read_subtitles(ictx: Input, selector: StreamSelector<'_>) -> Result<Vec<Subtitle>> {
+        let stream = get_stream(ictx.streams(), media::Type::Subtitle, selector)?;
+
+        for tmp in &stream.metadata() {
+            trace!("{:?}", tmp);
+        }
+
         let stream_idx = stream.index();
         trace!(
             "Using {} stream at index {}",
@@ -268,13 +274,13 @@ mod av {
 
     pub(super) fn read_subtitles_from_file<P: AsRef<Path>>(
         file: &P,
-        stream_idx: Option<usize>,
+        selector: StreamSelector<'_>,
     ) -> Result<Vec<Subtitle>> {
         let file_str = file.as_ref().to_string_lossy();
         let ictx = libav::format::input(file).context("Failed to open file")?;
         trace!("Opened a {} for reading subtitles", file_str);
 
-        read_subtitles(ictx, stream_idx)
+        read_subtitles(ictx, selector)
     }
 }
 
@@ -336,8 +342,8 @@ impl Subtitle {
 
 pub fn read_subtitles_from_file<P: AsRef<Path>>(
     file: &P,
-    stream_idx: Option<usize>,
+    selector: StreamSelector<'_>,
 ) -> Result<impl Iterator<Item = Subtitle>> {
-    let subs = av::read_subtitles_from_file(file, stream_idx)?;
+    let subs = av::read_subtitles_from_file(file, selector)?;
     Ok(subs.into_iter().flat_map(Subtitle::convert))
 }

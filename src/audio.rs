@@ -1,5 +1,5 @@
 use crate::time::Timespan;
-use crate::util::get_stream;
+use crate::util::{get_stream, StreamSelector};
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use libav::media;
@@ -50,14 +50,14 @@ where
 pub fn generate_audio_commands<'a, P, I>(
     path: P,
     points: I,
-    stream_idx: Option<usize>,
+    selector: StreamSelector<'_>,
 ) -> Result<Vec<Command>>
 where
     P: AsRef<Path>,
     I: Iterator<Item = (Timespan, &'a str)>,
 {
     let ictx = libav::format::input(&path).context("Failed to open file")?;
-    let stream = get_stream(ictx.streams(), media::Type::Audio, stream_idx)?;
+    let stream = get_stream(ictx.streams(), media::Type::Audio, selector)?;
     trace!(
         "Using {} stream at index {}",
         stream.parameters().id().name(),
