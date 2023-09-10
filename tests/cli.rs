@@ -69,7 +69,7 @@ fn no_subtitle_at_index() -> TestResult {
 fn subs_only() -> TestResult {
     let dir = tempdir()?;
     let mut file = dir.path().to_path_buf();
-    file.push("deck.apkg");
+    file.push("something.extension");
     Command::cargo_bin("stos")?
         .arg("tests/media/sub.srt")
         .arg("-o")
@@ -77,6 +77,22 @@ fn subs_only() -> TestResult {
         .assert()
         .success();
     assert!(file.exists());
+    Ok(())
+}
+
+#[test]
+fn no_deck() -> TestResult {
+    let dir = tempdir()?;
+    let mut file = dir.path().to_path_buf();
+    file.push("something.extension");
+    Command::cargo_bin("stos")?
+        .arg("tests/media/sub.srt")
+        .arg("-o")
+        .arg(&file)
+        .arg("--no-deck")
+        .assert()
+        .success();
+    assert!(!file.exists());
     Ok(())
 }
 

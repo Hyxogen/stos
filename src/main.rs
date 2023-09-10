@@ -163,6 +163,51 @@ where
     result
 }
 
+fn read_subtitles(files: &Vec<PathBuf>, sub_stream: Option<usize>) -> Result<Vec<Vec<Subtitle>>> {
+    files
+        .iter()
+        .map(|file| {
+            read_subtitles_from_file(&file, sub_stream).with_context(|| {
+                format!(
+                    "Failed to read subtitles from \"{}\"",
+                    file.to_string_lossy()
+                )
+            })
+        })
+        .map(|result| result.map(|subs| subs.collect()))
+        .collect()
+}
+
+fn process_subtitles(args: &Args, subs: Vec<Subtitle>) -> Vec<SubtitleBundle> {
+    let subs = if args.merge_subs() {
+        trace!("merging subtitles");
+        merge_overlapping(subs.into_iter(), args.merge_diff())
+    } else {
+        trace!("not merging subtitles");
+        subs
+    };
+
+    subs.into_iter()
+        .filter(|sub| sub.timespan().start() >= args.start())
+        .filter(|sub| sub.timespan().start() <= args.end())
+        .filter(|sub| {
+            !sub.text()
+                .map(|text| args.blacklist().iter().any(|re| re.is_match(text)))
+                .unwrap_or(false)
+        })
+        .filter(|sub| {
+            if args.whitelist().is_empty() {
+                true
+            } else {
+                sub.text()
+                    .map(|text| args.whitelist().iter().any(|re| re.is_match(text)))
+                    .unwrap_or(false)
+            }
+        })
+        .map(Into::into)
+        .collect()
+}
+
 fn run(args: &Args, multi: MultiProgress) -> Result<()> {
     trace!(
         "extracting subtitles form {} file(s)",
@@ -185,58 +230,10 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
 
     let max_file_width = (media_files.len().ilog10() + 1) as usize;
 
-    let subtitles = args
-        .sub_files()
-        .iter()
-        .map(|file| {
-            read_subtitles_from_file(&file, args.sub_stream()).with_context(|| {
-                format!(
-                    "Failed to read subtitles from \"{}\"",
-                    file.to_string_lossy()
-                )
-            })
-        })
-        .map(|result| result.map(|subs| subs.collect()))
-        .collect::<Result<Vec<Vec<Subtitle>>>>()?;
-
-    let subtitles = if args.merge_subs() {
-        trace!("merging subtitles");
-        subtitles
-            .into_iter()
-            .map(|subs| merge_overlapping(subs.into_iter(), args.merge_diff()))
-            .collect()
-    } else {
-        trace!("not merging subtitles");
-        subtitles
-    };
-
-    if subtitles.iter().all(|arr| arr.is_empty()) {
-        warn!("No subtitles extracted");
-    }
-
+    let subtitles = read_subtitles(args.sub_files(), args.sub_stream())?;
     let mut subtitles: Vec<Vec<SubtitleBundle>> = subtitles
         .into_iter()
-        .map(|subs| {
-            subs.into_iter()
-                .filter(|sub| sub.timespan().start() >= args.start())
-                .filter(|sub| sub.timespan().start() <= args.end())
-                .filter(|sub| {
-                    !sub.text()
-                        .map(|text| args.blacklist().iter().any(|re| re.is_match(text)))
-                        .unwrap_or(false)
-                })
-                .filter(|sub| {
-                    if args.whitelist().is_empty() {
-                        true
-                    } else {
-                        sub.text()
-                            .map(|text| args.whitelist().iter().any(|re| re.is_match(text)))
-                            .unwrap_or(false)
-                    }
-                })
-                .map(Into::into)
-                .collect()
-        })
+        .map(|subs| process_subtitles(args, subs))
         .collect();
 
     if subtitles.iter().all(|arr| arr.is_empty()) {
@@ -315,14 +312,6 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
                     file_idx, sub_idx
                 ));
             }
-
-            /*
-            if args.gen_audio() {
-                sub.set_audio(&format!(
-                    "audio_{:0max_file_width$}_{:0max_width$}.mka",
-                    file_idx, sub_idx
-                ));
-            }*/
 
             if args.gen_images() {
                 sub.set_image(&format!(
