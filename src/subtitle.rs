@@ -3,6 +3,7 @@ use crate::time::Timespan;
 use crate::util::StreamSelector;
 use anyhow::Result;
 use image::RgbaImage;
+use serde::{Serialize, Serializer};
 use std::path::Path;
 
 mod av {
@@ -291,6 +292,24 @@ pub enum Dialogue {
     Bitmap(RgbaImage),
 }
 
+impl Serialize for Dialogue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Dialogue::Text(text) => {
+                serializer.serialize_newtype_variant("Dialogue", 0, "Text", text)
+            }
+            Dialogue::Ass(ass) => serializer.serialize_newtype_variant("Dialogue", 1, "Ass", ass),
+            Dialogue::Bitmap(_) => {
+                serializer.serialize_newtype_variant("Dialogue", 2, "Bitmap", "empty")
+            }
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct Subtitle {
     timespan: Timespan,
     diag: Dialogue,

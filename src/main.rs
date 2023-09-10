@@ -7,6 +7,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use log::{error, trace, warn};
 use rayon::prelude::*;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -27,6 +28,7 @@ use subtitle::{read_subtitles_from_file, Dialogue, Subtitle};
 use time::{Duration, Timespan, Timestamp};
 use util::StreamSelector;
 
+#[derive(Serialize)]
 pub struct SubtitleBundle {
     sub: Subtitle,
     sub_image: Option<String>,
@@ -453,6 +455,11 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
         trace!("did not write an anki deck because --no-deck was specified");
     }
 
+    if args.write_json() {
+        let serialized = serde_json::to_string(&subtitles)?;
+        print!("{}", serialized);
+    }
+
     //read subtitles
     //filter/transform subtitles
     //generate media
@@ -482,4 +489,136 @@ fn main() -> Result<()> {
         //print pretty error
     }*/
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ass::DialogueEvent;
+    use crate::time::{Timespan, Timestamp};
+    use assert_cmd::prelude::*;
+    use serde::Deserialize;
+    use std::process::Command;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize)]
+    enum Dialogue {
+        Text(String),
+        Ass(DialogueEvent),
+        Bitmap(String),
+    }
+
+    #[derive(Deserialize)]
+    struct Subtitle {
+        pub timespan: Timespan,
+        pub diag: Dialogue,
+    }
+
+    #[derive(Deserialize)]
+    struct SubtitleBundle {
+        pub sub: Subtitle,
+        pub sub_image: Option<String>,
+        pub audio: Option<String>,
+        pub image: Option<String>,
+    }
+
+    #[test]
+    fn blacklist() -> TestResult {
+        let out = Command::cargo_bin("stos")?
+            .arg("tests/media/sub.srt")
+            .arg("--no-deck")
+            .arg("--no-media")
+            .arg("--write-json")
+            .arg("-b")
+            .arg("Hello")
+            .assert()
+            .success();
+        let stdout = String::from_utf8(out.get_output().stdout.clone())?;
+
+        let subs: Vec<Vec<SubtitleBundle>> = serde_json::from_str(&stdout)?;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn blacklist_no_match() -> TestResult {
+        let out = Command::cargo_bin("stos")?
+            .arg("tests/media/sub.srt")
+            .arg("--no-deck")
+            .arg("--no-media")
+            .arg("--write-json")
+            .arg("-b")
+            .arg("don't match")
+            .assert()
+            .success();
+        let stdout = String::from_utf8(out.get_output().stdout.clone())?;
+
+        let subs: Vec<Vec<SubtitleBundle>> = serde_json::from_str(&stdout)?;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn whitelist() -> TestResult {
+        let out = Command::cargo_bin("stos")?
+            .arg("tests/media/sub.srt")
+            .arg("--no-deck")
+            .arg("--no-media")
+            .arg("--write-json")
+            .arg("-w")
+            .arg("Hello")
+            .assert()
+            .success();
+        let stdout = String::from_utf8(out.get_output().stdout.clone())?;
+
+        let subs: Vec<Vec<SubtitleBundle>> = serde_json::from_str(&stdout)?;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn whitelist_no_match() -> TestResult {
+        let out = Command::cargo_bin("stos")?
+            .arg("tests/media/sub.srt")
+            .arg("--no-deck")
+            .arg("--no-media")
+            .arg("--write-json")
+            .arg("-w")
+            .arg("don't match")
+            .assert()
+            .success();
+        let stdout = String::from_utf8(out.get_output().stdout.clone())?;
+
+        let subs: Vec<Vec<SubtitleBundle>> = serde_json::from_str(&stdout)?;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_subs() -> TestResult {
+        let out = Command::cargo_bin("stos")?
+            .arg("tests/media/mergable_sub.srt")
+            .arg("--no-deck")
+            .arg("--no-media")
+            .arg("--write-json")
+            .arg("--merge")
+            .assert()
+            .success();
+        let stdout = String::from_utf8(out.get_output().stdout.clone())?;
+
+        let subs: Vec<Vec<SubtitleBundle>> = serde_json::from_str(&stdout)?;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].len(), 2);
+
+        assert_eq!(
+            subs[0][1].sub.timespan.start(),
+            Timestamp::from_millis(8000)
+        );
+        assert_eq!(subs[0][1].sub.timespan.end(), Timestamp::from_millis(9500));
+        Ok(())
+    }
 }

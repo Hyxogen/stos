@@ -47,7 +47,6 @@ fn print_help(executable: &str) {
     println!("    --video-stream=INDEX          Select which stream to use to generate the images");
     println!("    -m, --media                   Specify media files from which to generate the audio snippets `-a` and/or images `-i`");
     println!("    --no-media                    Will not write media files specified by `-a` and/or `-i`");
-    println!("    -c, --coalesce                Merge overlapping audio snippets to one");
     println!("    -b, --blacklist               Do not include subtitles that match this regex (can be used multiple times)");
     println!("    -w, --whitelist               Only include subtitles that match this regex (can be used multiple times)");
     println!("    --no-deck                     Do not write an anki deck package");
@@ -101,6 +100,8 @@ pub struct Args {
     deck_desc: String,
     package: PathBuf,
 
+    write_json: bool,
+
     verbosity: LevelFilter,
 }
 
@@ -135,6 +136,7 @@ impl Default for Args {
             deck_name: DEFAULT_DECK_NAME.to_string(),
             deck_desc: DEFAULT_DECK_DESC.to_string(),
             package: DEFAULT_DECK_FILE.into(),
+            write_json: false,
             verbosity: LevelFilter::Error,
         }
     }
@@ -250,6 +252,9 @@ impl Args {
                 Long("width") => args.image_width = Some(Self::convert(parser.value()?)?.parse()?),
                 Long("height") => {
                     args.image_height = Some(Self::convert(parser.value()?)?.parse()?)
+                }
+                Long("write-json") => {
+                    args.write_json = true;
                 }
                 Value(file) if taking_media => args.media_files.push(file.into()),
                 Value(file) if !taking_media => args.sub_files.push(file.into()),
@@ -426,6 +431,10 @@ impl Args {
 
     pub fn package(&self) -> &PathBuf {
         &self.package
+    }
+
+    pub fn write_json(&self) -> bool {
+        self.write_json
     }
 
     pub fn verbosity(&self) -> LevelFilter {

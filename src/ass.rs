@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
@@ -23,7 +24,7 @@ impl fmt::Display for AssError {
 
 impl std::error::Error for AssError {}
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct AssText {
     pub text: String,
     pub dialogue: String,
@@ -69,7 +70,7 @@ impl FromStr for AssText {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct DialogueEvent {
     pub name: String,
     pub text: AssText,

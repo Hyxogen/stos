@@ -1,15 +1,22 @@
 use anyhow::{bail, Error, Result};
 use libav::mathematics::rescale::Rescale;
 use libav::util::rational::Rational;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::{Add, Sub};
 use std::str::FromStr;
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash, Serialize, Deserialize,
+)]
 pub struct Timestamp(i64);
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash, Serialize, Deserialize,
+)]
 pub struct Duration(i64);
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Default, Hash, Serialize, Deserialize,
+)]
 pub struct Timespan {
     start: Timestamp,
     end: Timestamp,
