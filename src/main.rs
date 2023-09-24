@@ -628,4 +628,26 @@ mod tests {
         assert_eq!(subs[0][1].sub.timespan.end(), Timestamp::from_millis(9500));
         Ok(())
     }
+
+    #[test]
+    fn test_ass() -> TestResult {
+        let out = Command::cargo_bin("stos")?
+            .arg("tests/media/test.ass")
+            .arg("--no-deck")
+            .arg("--no-media")
+            .arg("--write-json")
+            .arg("--merge")
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8(out.get_output().stdout.clone())?;
+
+        let subs: Vec<Vec<SubtitleBundle>> = serde_json::from_str(&stdout)?;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].len(), 1);
+
+        assert_eq!(subs[0][0].sub.timespan.start(), Timestamp::from_millis(0));
+        assert_eq!(subs[0][0].sub.timespan.end(), Timestamp::from_millis(30050));
+        Ok(())
+    }
 }

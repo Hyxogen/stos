@@ -39,6 +39,7 @@ mod av {
         subtitle: subtitle::Subtitle,
         start: Option<i64>,
         duration: i64,
+        time_base: Rational,
     }
 
     impl TryFrom<subtitle::Rect<'_>> for Rect {
@@ -79,7 +80,9 @@ mod av {
                 ))
             } else if av_sub.duration > 0 {
                 //TODO check if packet.duration() is in millis or in timebase
-                Some(Duration::from_millis(av_sub.duration))
+                Some(Duration::from_millis(
+                    Timestamp::from_libav_ts(av_sub.duration, av_sub.time_base)?.as_millis(),
+                ))
             } else {
                 None
             };
@@ -119,7 +122,7 @@ mod av {
         fn decode(
             packet: Packet,
             decoder: &mut decoder::subtitle::Subtitle,
-            timebase: Rational,
+            time_base: Rational,
         ) -> Result<Option<Self>> {
             let mut subtitle = Default::default();
             match decoder
@@ -131,8 +134,9 @@ mod av {
                     start: packet
                         .pts()
                         .or(packet.dts())
-                        .map(|v| v.rescale(timebase, Self::TIMEBASE)),
+                        .map(|v| v.rescale(time_base, Self::TIMEBASE)),
                     duration: packet.duration(),
+                    time_base,
                 })),
                 false => Ok(None),
             }
