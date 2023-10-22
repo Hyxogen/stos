@@ -10,7 +10,7 @@ But sadly that program is written is C#, which is annoying to use outside of Win
   * [General options](#usage-and-options)
   * [Examples without attached media](#example-without-attached-media)
   * [Examples with attached media](#example-with-attached-media)
-* [Contributing](#constributing)
+* [Contributing](#contributing)
 # Usage
 
 ## Usage and options
