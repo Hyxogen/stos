@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "multimedia"]
 
 [dependencies]
 anyhow = "1.0.77"
-crossbeam-channel = "0.5.10"
+crossbeam-channel = "0.5.11"
 ffmpeg-next = "6.1.0"
 genanki-rs = { git = "https://github.com/Hyxogen/genanki-rs.git", version = "0.3.1" }
 human-panic = "1.2.2"
