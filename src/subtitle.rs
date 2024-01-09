@@ -178,9 +178,7 @@ mod av {
 
             for y in 0..height {
                 for x in 0..width {
-                    let index: usize = indices[y * linesize + x]
-                        .try_into()
-                        .context("failed to convert u32 to usize")?;
+                    let index: usize = indices[y * linesize + x].into();
 
                     let argb = palette[index].to_le_bytes();
                     let a = argb[0];
