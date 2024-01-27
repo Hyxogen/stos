@@ -68,6 +68,6 @@ where
         path,
         points,
         stream.index(),
-        128usize.try_into().unwrap(),
+        32usize.try_into().unwrap(),
     ))
 }
