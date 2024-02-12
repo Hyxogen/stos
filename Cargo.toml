@@ -18,7 +18,7 @@ ffmpeg-next = "6.1.0"
 genanki-rs = { git = "https://github.com/Hyxogen/genanki-rs.git", version = "0.3.1" }
 human-panic = "1.2.3"
 image = "0.24.8"
-indicatif = "0.17.6"
+indicatif = "0.17.8"
 indicatif-log-bridge = "0.2.1"
 itertools = "0.12.1"
 lexopt = "0.3.0"
