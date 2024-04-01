@@ -17,7 +17,7 @@ crossbeam-channel = "0.5.12"
 ffmpeg-next = "6.1.0"
 genanki-rs = { git = "https://github.com/Hyxogen/genanki-rs.git", version = "0.3.1" }
 human-panic = "1.2.3"
-image = "0.25.0"
+image = "0.25.1"
 indicatif = "0.17.8"
 indicatif-log-bridge = "0.2.1"
 itertools = "0.12.1"
