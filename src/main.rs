@@ -7,6 +7,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use log::{error, trace, warn};
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -484,6 +485,13 @@ fn main() -> Result<()> {
     let logger = pretty_env_logger::formatted_builder()
         .filter_level(args.verbosity())
         .build();
+
+    if let Some(job_count) = args.job_count() {
+        ThreadPoolBuilder::new()
+            .num_threads(job_count)
+            .build_global()
+            .context("failed to initialize thread pool")?;
+    }
 
     let multi = MultiProgress::new();
     LogWrapper::new(multi.clone(), logger).try_init().unwrap();

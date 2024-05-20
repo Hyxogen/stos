@@ -44,6 +44,7 @@ fn print_help(executable: &str) {
     println!("    --pad-end=MILLISECONDS        Pad the end time of each audio clip with MILLISECONDS amount");
     println!("    --shift-audio=MILLISECONDS    Shift the audio timings by MILLISECONDS amount");
     println!("    --join-audio                  Join overlapping audio into one clip");
+    println!("    -j JOBS, --jobs=JOBS          Specify amount of concurrent jobs stos will spawn [default: system logical core count]");
     println!("    -i, --image                   Generate images for the anki cards");
     println!("    --video-stream=INDEX          Select which stream to use to generate the images");
     println!("    -m, --media                   Specify media files from which to generate the audio snippets `-a` and/or images `-i`");
@@ -89,6 +90,8 @@ pub struct Args {
     shift_audio: Duration,
     join_audio: bool,
 
+    job_count: Option<usize>,
+
     gen_images: bool,
     video_stream: Option<usize>,
     image_width: Option<u32>,
@@ -129,6 +132,7 @@ impl Default for Args {
             pad_end: Duration::from_millis(0),
             shift_audio: Duration::from_millis(0),
             join_audio: false,
+            job_count: None,
             gen_images: false,
             video_stream: Default::default(),
             image_width: Default::default(),
@@ -234,6 +238,9 @@ impl Args {
                 }
                 Long("join-audio") => {
                     args.join_audio = true;
+                }
+                Short('j') | Long("jobs") => {
+                    args.job_count = Some(Self::convert(parser.value()?)?.parse()?);
                 }
                 Short('i') => {
                     args.gen_images = true;
@@ -405,6 +412,10 @@ impl Args {
 
     pub fn join_audio(&self) -> bool {
         self.join_audio
+    }
+
+    pub fn job_count(&self) -> Option<usize> {
+        self.job_count
     }
 
     pub fn video_stream_selector(&self) -> StreamSelector {
