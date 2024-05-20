@@ -234,6 +234,8 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
     if args.sub_files().is_empty() {
         bail!("no subtitle files specified");
     }
+
+    trace!("got {} media file(s)", media_files.len());
     if media_files.len() != args.sub_files().len() {
         bail!("the amount of media files must be the same as the amount of subtitle files");
     }
