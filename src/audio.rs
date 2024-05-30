@@ -6,7 +6,7 @@ use libav::media;
 use log::trace;
 use std::num::NonZeroUsize;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn generate_audio_command_from_stream<'a, P, I>(path: P, points: I, stream_idx: usize) -> Command
 where
@@ -26,6 +26,8 @@ where
 
     command.arg("-loglevel").arg("warning");
     command.arg("-i").arg(path.as_ref());
+
+    command.stdin(Stdio::null());
 
     command
 }
