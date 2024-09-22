@@ -58,7 +58,10 @@ where
     P: AsRef<Path>,
     I: Iterator<Item = (Timespan, &'a str)>,
 {
-    let ictx = libav::format::input(&path).context("Failed to open file")?;
+    let ictx = libav::format::input(&path).context(format!(
+        "{}: Failed to open file",
+        path.as_ref().to_string_lossy()
+    ))?;
     let stream = get_stream(ictx.streams(), media::Type::Audio, selector)?;
     trace!(
         "Using {} stream at index {}",

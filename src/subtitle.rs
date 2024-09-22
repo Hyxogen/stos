@@ -274,7 +274,8 @@ mod av {
         selector: StreamSelector<'_>,
     ) -> Result<Vec<Subtitle>> {
         let file_str = file.as_ref().to_string_lossy();
-        let ictx = libav::format::input(file).context("Failed to open file")?;
+        let ictx =
+            libav::format::input(file).context(format!("{}: Failed to open file", file_str))?;
         trace!("Opened a {} for reading subtitles", file_str);
 
         read_subtitles(ictx, selector)
