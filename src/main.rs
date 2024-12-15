@@ -99,7 +99,7 @@ enum Job<'a, 'b, 'c> {
     },
 }
 
-impl<'a, 'b, 'c> Job<'a, 'b, 'c> {
+impl Job<'_, '_, '_> {
     pub fn execute(self) -> Result<()> {
         match self {
             Job::Command { pb, command } => {
@@ -468,6 +468,19 @@ fn run(args: &Args, multi: MultiProgress) -> Result<()> {
     if args.write_json() {
         let serialized = serde_json::to_string(&subtitles)?;
         print!("{}", serialized);
+    }
+
+    if args.dump() {
+        for file in &subtitles {
+            for bundle in file {
+                println!(
+                    "{}|{}|{}",
+                    bundle.sub.timespan().start(),
+                    bundle.sub.timespan().end(),
+                    bundle.sub.text().unwrap_or(""),
+                );
+            }
+        }
     }
 
     //read subtitles

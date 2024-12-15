@@ -106,6 +106,7 @@ pub struct Args {
     package: PathBuf,
 
     write_json: bool,
+    dump: bool,
 
     verbosity: LevelFilter,
 }
@@ -144,6 +145,7 @@ impl Default for Args {
             deck_desc: DEFAULT_DECK_DESC.to_string(),
             package: DEFAULT_DECK_FILE.into(),
             write_json: false,
+            dump: false,
             verbosity: LevelFilter::Error,
         }
     }
@@ -268,6 +270,9 @@ impl Args {
                 }
                 Long("write-json") => {
                     args.write_json = true;
+                }
+                Long("dump") => {
+                    args.dump = true;
                 }
                 Value(file) if taking_media => args.media_files.push(file.into()),
                 Value(file) if !taking_media => args.sub_files.push(file.into()),
@@ -456,6 +461,10 @@ impl Args {
 
     pub fn write_json(&self) -> bool {
         self.write_json
+    }
+
+    pub fn dump(&self) -> bool {
+        self.dump
     }
 
     pub fn verbosity(&self) -> LevelFilter {
