@@ -26,7 +26,7 @@ fn print_help(executable: &str) {
     println!("    {} --version", executable);
     println!();
     println!("OPTIONS:");
-    println!("    -h, --help                    Print a this help message and exit");
+    println!("    -h, --help                    Print this help message and exit");
     println!("    --version                     Print version and exit");
     println!("    -v                            Increase verbosity of program logs");
     println!("    -o FILE, --output=FILE        Specify the file to write the anki deck to [default: {}]", DEFAULT_DECK_FILE);
