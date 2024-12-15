@@ -65,7 +65,7 @@ stos media_with_subtitle.mkv
 ```
 stos will in this case select the first subtitle stream. You can select a specific subtitle stream using the `--sub-stream` or `--sub-lang` like this:
 ```
-stos media_with_subtitle.mkv--sub-stream=1
+stos media_with_subtitle.mkv --sub-stream=1
 stos media_with_subtitle.mkv --sub-lang=jpn
 ```
 
