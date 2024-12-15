@@ -19,7 +19,7 @@ stos [OPTIONS] <SUBTITLE_FILE>... [-a | -i] [-m MEDIA_FILES...]
 ```
 General options:
 ```
-    -h, --help                    Print a this help message and exit
+    -h, --help                    Print this help message and exit
     --version                     Print version and exit
     -v                            Increase verbosity of program logs
     -o FILE, --output=FILE        Specify the file to write the anki deck to [default: deck.apkg]
@@ -37,6 +37,7 @@ General options:
     --pad-end=MILLISECONDS        Pad the end time of each audio clip with MILLISECONDS amount
     --shift-audio=MILLISECONDS    Shift the audio timings by MILLISECONDS amount
     --join-audio                  Join overlapping audio into one clip
+    -j JOBS, --jobs=JOBS          Specify amount of concurrent jobs stos will spawn [default: system logical core count]
     -i, --image                   Generate images for the anki cards
     --video-stream=INDEX          Select which stream to use to generate the images
     -m, --media                   Specify media files from which to generate the audio snippets `-a` and/or images `-i`
